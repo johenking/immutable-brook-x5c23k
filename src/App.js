@@ -1243,21 +1243,25 @@ const App = () => {
             <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none group-hover:opacity-10 transition-opacity duration-500">
               <Activity size={120} />
             </div>
-            <div className="flex items-center justify-between mb-6 relative z-10">
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 relative z-10 gap-4">
+              {/* 标题区域 */}
               <div>
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
                   <LayoutDashboard className="text-blue-500" size={20} />{" "}
-                  集团军作战 & ROI
+                  <span className="truncate">集团军作战 & ROI</span>
                 </h2>
                 <p className="text-slate-400 text-sm mt-1">
                   "像经营公司一样经营你的人生。"
                 </p>
               </div>
-              <div className="flex gap-2">
+
+              {/* 按钮控制区域 */}
+              <div className="flex items-center justify-between md:justify-end gap-2 w-full md:w-auto">
+                {/* 列表/日历 切换器 */}
                 <div className="flex bg-black/40 p-1 rounded-xl border border-white/10">
                   <button
                     onClick={() => setTaskViewMode("list")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
+                    className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
                       taskViewMode === "list"
                         ? "bg-slate-700 text-white shadow"
                         : "text-slate-500 hover:text-slate-300"
@@ -1267,7 +1271,7 @@ const App = () => {
                   </button>
                   <button
                     onClick={() => setTaskViewMode("calendar")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
+                    className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
                       taskViewMode === "calendar"
                         ? "bg-slate-700 text-white shadow"
                         : "text-slate-500 hover:text-slate-300"
@@ -1276,6 +1280,8 @@ const App = () => {
                     <CalendarIcon size={14} /> 日历
                   </button>
                 </div>
+
+                {/* 新项目按钮 - 手机端只显示图标，PC端显示文字 */}
                 <button
                   onClick={() => {
                     setIsManualEntry(false);
@@ -1283,7 +1289,8 @@ const App = () => {
                   }}
                   className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg hover:scale-105 active:scale-95 transition-all"
                 >
-                  <Plus size={16} /> 投入新项目
+                  <Plus size={18} />
+                  <span className="hidden md:inline">投入新项目</span>
                 </button>
               </div>
             </div>
