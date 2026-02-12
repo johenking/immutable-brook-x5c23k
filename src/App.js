@@ -474,25 +474,6 @@ const AuditItem = ({ type, val, setVal, note, setNote }) => {
 
 // --- Calendar ---
 const CalendarView = ({ type, data, onSelectDate }) => {
-  // 👇👇👇 补上这段缺失的逻辑，白屏立刻就好 👇👇👇
-  const [showUserMenu, setShowUserMenu] = useState(false); // 1. 控制菜单开关
-
-  const playerStats = useMemo(() => {
-    // 2. 计算 RPG 等级
-    const totalXP = Math.floor(stats.totalDurationHrs * 60);
-    const level = Math.floor(totalXP / 1000) + 1;
-    const currentLevelXP = totalXP % 1000;
-    const nextLevelXP = 1000;
-    const progress = (currentLevelXP / nextLevelXP) * 100;
-
-    let title = "见习者";
-    if (level >= 3) title = "修行者";
-    if (level >= 5) title = "觉醒者";
-    if (level >= 10) title = "破局者";
-    if (level >= 20) title = "主宰";
-
-    return { totalXP, level, currentLevelXP, nextLevelXP, progress, title };
-  }, [stats.totalDurationHrs]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const daysInMonth = new Date(
     currentDate.getFullYear(),
@@ -923,7 +904,25 @@ const App = () => {
         : 0;
     return { totalDurationHrs, totalRevenue, avgROI, timeDebtTasks, avgAgency };
   }, [tasks, reviews]);
+// 👇👇👇 补上这段缺失的逻辑，白屏立刻就好 👇👇👇
+const [showUserMenu, setShowUserMenu] = useState(false); // 1. 控制菜单开关
 
+const playerStats = useMemo(() => {
+  // 2. 计算 RPG 等级
+  const totalXP = Math.floor(stats.totalDurationHrs * 60);
+  const level = Math.floor(totalXP / 1000) + 1;
+  const currentLevelXP = totalXP % 1000;
+  const nextLevelXP = 1000;
+  const progress = (currentLevelXP / nextLevelXP) * 100;
+
+  let title = "见习者";
+  if (level >= 3) title = "修行者";
+  if (level >= 5) title = "觉醒者";
+  if (level >= 10) title = "破局者";
+  if (level >= 20) title = "主宰";
+
+  return { totalXP, level, currentLevelXP, nextLevelXP, progress, title };
+}, [stats.totalDurationHrs]);
   const groupedTasks = useMemo(() => {
     const groups = {};
     tasks.forEach((task) => {
