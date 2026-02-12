@@ -859,29 +859,6 @@ const App = () => {
 
   // --- Stats ---
   const stats = useMemo(() => {
-    // 👇👇👇 插入 RPG 等级计算逻辑 👇👇👇
-    const [showUserMenu, setShowUserMenu] = useState(false); // 控制账号菜单显示
-
-    const playerStats = useMemo(() => {
-      // 经验值算法：过去所有完成任务的分钟数 = XP
-      // 比如：投入 100 小时 = 6000 XP
-      const totalXP = Math.floor(stats.totalDurationHrs * 60);
-
-      // 升级算法：每一级需要 1000 XP (大约 16.6 小时投入)
-      const level = Math.floor(totalXP / 1000) + 1;
-      const currentLevelXP = totalXP % 1000;
-      const nextLevelXP = 1000;
-      const progress = (currentLevelXP / nextLevelXP) * 100;
-
-      // 头衔系统
-      let title = "见习者";
-      if (level >= 3) title = "修行者";
-      if (level >= 5) title = "觉醒者";
-      if (level >= 10) title = "破局者";
-      if (level >= 20) title = "主宰";
-
-      return { totalXP, level, currentLevelXP, nextLevelXP, progress, title };
-    }, [stats.totalDurationHrs]);
     const completed = tasks.filter((t) => t.status === "Completed");
     const totalDurationHrs =
       tasks.reduce((acc, t) => acc + (t.duration || 0), 0) / 3600;
@@ -904,25 +881,25 @@ const App = () => {
         : 0;
     return { totalDurationHrs, totalRevenue, avgROI, timeDebtTasks, avgAgency };
   }, [tasks, reviews]);
-// 👇👇👇 补上这段缺失的逻辑，白屏立刻就好 👇👇👇
-const [showUserMenu, setShowUserMenu] = useState(false); // 1. 控制菜单开关
+  // 👇👇👇 补上这段缺失的逻辑，白屏立刻就好 👇👇👇
+  const [showUserMenu, setShowUserMenu] = useState(false); // 1. 控制菜单开关
 
-const playerStats = useMemo(() => {
-  // 2. 计算 RPG 等级
-  const totalXP = Math.floor(stats.totalDurationHrs * 60);
-  const level = Math.floor(totalXP / 1000) + 1;
-  const currentLevelXP = totalXP % 1000;
-  const nextLevelXP = 1000;
-  const progress = (currentLevelXP / nextLevelXP) * 100;
+  const playerStats = useMemo(() => {
+    // 2. 计算 RPG 等级
+    const totalXP = Math.floor(stats.totalDurationHrs * 60);
+    const level = Math.floor(totalXP / 1000) + 1;
+    const currentLevelXP = totalXP % 1000;
+    const nextLevelXP = 1000;
+    const progress = (currentLevelXP / nextLevelXP) * 100;
 
-  let title = "见习者";
-  if (level >= 3) title = "修行者";
-  if (level >= 5) title = "觉醒者";
-  if (level >= 10) title = "破局者";
-  if (level >= 20) title = "主宰";
+    let title = "见习者";
+    if (level >= 3) title = "修行者";
+    if (level >= 5) title = "觉醒者";
+    if (level >= 10) title = "破局者";
+    if (level >= 20) title = "主宰";
 
-  return { totalXP, level, currentLevelXP, nextLevelXP, progress, title };
-}, [stats.totalDurationHrs]);
+    return { totalXP, level, currentLevelXP, nextLevelXP, progress, title };
+  }, [stats.totalDurationHrs]);
   const groupedTasks = useMemo(() => {
     const groups = {};
     tasks.forEach((task) => {
