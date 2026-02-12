@@ -311,90 +311,46 @@ const TrendChart = ({ data, dataKey, color, height = 50 }) => {
   );
 };
 
-// 👇👇👇 替换原来的 AuditItem 组件 (手感顺滑修复版) 👇👇👇
+// 👇👇👇 替换原来的 AuditItem 组件 (超大热区+丝滑GPU加速版) 👇👇👇
 const AuditItem = ({ type, val, setVal, note, setNote }) => {
   const criteria = RATING_CRITERIA[type];
-
+  
   const getLevelInfo = (v) => {
     const score = Number(v);
-    if (score <= 2)
-      return {
-        text: criteria.levels[1],
-        color:
-          "text-rose-500 bg-rose-500/10 border-rose-500/20 shadow-rose-900/20",
-      };
-    if (score <= 4)
-      return {
-        text: criteria.levels[2],
-        color:
-          "text-orange-400 bg-orange-500/10 border-orange-500/20 shadow-orange-900/20",
-      };
-    if (score <= 6)
-      return {
-        text: criteria.levels[3],
-        color:
-          "text-amber-300 bg-amber-500/10 border-amber-500/20 shadow-amber-900/20",
-      };
-    if (score <= 8)
-      return {
-        text: criteria.levels[4],
-        color:
-          "text-emerald-400 bg-emerald-500/10 border-emerald-500/20 shadow-emerald-900/20",
-      };
-    return {
-      text: criteria.levels[5],
-      color:
-        "text-cyan-300 bg-cyan-500/10 border-cyan-500/50 shadow-[0_0_15px_rgba(34,211,238,0.2)] animate-pulse",
-    };
+    if (score <= 2) return { text: criteria.levels[1], color: "text-rose-500 bg-rose-500/10 border-rose-500/20 shadow-rose-900/20" };
+    if (score <= 4) return { text: criteria.levels[2], color: "text-orange-400 bg-orange-500/10 border-orange-500/20 shadow-orange-900/20" };
+    if (score <= 6) return { text: criteria.levels[3], color: "text-amber-300 bg-amber-500/10 border-amber-500/20 shadow-amber-900/20" };
+    if (score <= 8) return { text: criteria.levels[4], color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20 shadow-emerald-900/20" };
+    return { text: criteria.levels[5], color: "text-cyan-300 bg-cyan-500/10 border-cyan-500/50 shadow-[0_0_15px_rgba(34,211,238,0.2)] animate-pulse" };
   };
 
   const levelInfo = getLevelInfo(val);
 
   return (
-    <div className="bg-[#1e293b]/40 p-5 rounded-2xl border border-white/5 transition-all hover:border-white/10 group relative">
+    // 在最外层加一个 group 类，用于控制子元素在 active 状态下的样式
+    <div className="bg-[#1e293b]/40 p-5 rounded-2xl border border-white/5 transition-all hover:border-white/10 group relative select-none">
       {/* 标题栏 */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
-          <div
-            className={`p-2.5 rounded-xl bg-slate-800 shadow-inner ${
-              criteria.color === "rose"
-                ? "text-rose-400"
-                : criteria.color === "amber"
-                ? "text-amber-400"
-                : criteria.color === "emerald"
-                ? "text-emerald-400"
-                : criteria.color === "blue"
-                ? "text-blue-400"
-                : "text-purple-400"
-            }`}
-          >
+          <div className={`p-2.5 rounded-xl bg-slate-800 shadow-inner ${criteria.color === 'rose' ? 'text-rose-400' : criteria.color === 'amber' ? 'text-amber-400' : criteria.color === 'emerald' ? 'text-emerald-400' : criteria.color === 'blue' ? 'text-blue-400' : 'text-purple-400'}`}>
             {criteria.icon}
           </div>
           <div>
-            <div className="text-sm font-bold text-slate-200">
-              {criteria.label}
-            </div>
-            <div className="text-[10px] text-slate-500 leading-tight mt-0.5">
-              {criteria.definition}
-            </div>
+            <div className="text-sm font-bold text-slate-200">{criteria.label}</div>
+            <div className="text-[10px] text-slate-500 leading-tight mt-0.5">{criteria.definition}</div>
           </div>
         </div>
         <div className="flex items-baseline gap-1">
-          <span
-            className={`font-mono text-3xl font-bold tracking-tighter ${
-              levelInfo.color.split(" ")[0]
-            }`}
-          >
-            {val}
-          </span>
+          <span className={`font-mono text-3xl font-bold tracking-tighter ${levelInfo.color.split(" ")[0]}`}>{val}</span>
           <span className="text-xs text-slate-600 font-bold">/10</span>
         </div>
       </div>
 
-      {/* 滑块区域 (核心修复区) */}
-      <div className="relative h-12 flex items-center mb-4 select-none touch-none">
-        {/* 🟢 [关键修复] touch-none: 禁止在此区域触发页面滚动，解决卡顿 */}
-
+      {/* === 滑块区域 (核心优化区) === */}
+      {/* 1. 加高容器到 h-14 (56px)，确保足够大的触控垂直空间 */}
+      <div className="relative h-14 flex items-center mb-4 touch-none"> 
+        
+        {/* 2. 原生输入控件：透明、全屏覆盖、层级最高 */}
         <input
           type="range"
           min="1"
@@ -402,62 +358,49 @@ const AuditItem = ({ type, val, setVal, note, setNote }) => {
           step="0.5"
           value={val}
           onChange={(e) => setVal(e.target.value)}
-          // 🟢 [关键修复] opacity-0 + absolute inset-0 + z-20: 让真正的滑块铺满整个区域并置顶
-          className="absolute inset-0 w-full h-full opacity-0 z-20 cursor-pointer active:cursor-grabbing"
-          style={{ touchAction: "none" }} // 双重保险禁止滚动
+          // 🟢 z-30 确保在最上层；h-full w-full 铺满整个触控区；cursor-grab 提供鼠标反馈
+          className="absolute inset-0 w-full h-full opacity-0 z-30 cursor-grab active:cursor-grabbing"
+          style={{ touchAction: 'none' }}
         />
 
-        {/* 自定义滑块轨道 UI (视觉层，不参与交互) */}
-        <div className="w-full h-3 bg-slate-800/80 rounded-full overflow-hidden relative border border-white/5 pointer-events-none">
-          <div
-            className={`h-full transition-all duration-100 ease-out ${
-              Number(val) > 8
-                ? "bg-gradient-to-r from-blue-500 to-cyan-400"
-                : Number(val) > 6
-                ? "bg-emerald-500"
-                : Number(val) > 4
-                ? "bg-amber-400"
-                : Number(val) > 2
-                ? "bg-orange-500"
-                : "bg-rose-500"
-            }`}
-            style={{ width: `${val * 10}%` }}
-          ></div>
+        {/* 3. 自定义滑块轨道 UI (视觉层，位于中间层 z-10) */}
+        <div className="w-full h-3 bg-slate-800/80 rounded-full overflow-hidden relative border border-white/5 pointer-events-none z-10">
+           <div 
+             // 这里的 transition 只负责颜色变化，不负责位置，避免卡顿
+             className={`h-full transition-colors duration-200 ease-out ${Number(val) > 8 ? 'bg-gradient-to-r from-blue-500 to-cyan-400' : Number(val) > 6 ? 'bg-emerald-500' : Number(val) > 4 ? 'bg-amber-400' : Number(val) > 2 ? 'bg-orange-500' : 'bg-rose-500'}`} 
+             style={{ width: `${val * 10}%` }}
+           ></div>
         </div>
-
-        {/* 自定义滑块头 (跟随移动) */}
-        <div
-          className="absolute h-6 w-6 bg-white rounded-full shadow-[0_2px_10px_rgba(0,0,0,0.5)] border-4 border-[#0f172a] pointer-events-none transition-all duration-100 ease-out flex items-center justify-center z-10"
-          style={{ left: `calc(${val * 10}% - 12px)` }}
+        
+        {/* 4. 自定义滑块头 (视觉层，跟随移动，位于 z-20) */}
+        <div 
+          // 🟢 will-change-transform 开启 GPU 加速
+          // 🟢 group-active:scale-110 拖动时放大给予反馈
+          // 🟢 使用 translate(-50%, -50%) 进行更精准的中心定位
+          className="absolute top-1/2 h-7 w-7 bg-white rounded-full shadow-[0_2px_10px_rgba(0,0,0,0.5)] border-4 border-[#0f172a] pointer-events-none transition-transform duration-150 ease-out flex items-center justify-center z-20 will-change-transform group-active:scale-110"
+          style={{ 
+            left: `${val * 10}%`,
+            transform: `translate(-50%, -50%)` 
+          }}
         >
-          <div
-            className={`w-1.5 h-1.5 rounded-full ${
-              Number(val) > 8 ? "bg-cyan-500" : "bg-slate-400"
-            }`}
-          ></div>
+          <div className={`w-2 h-2 rounded-full ${Number(val) > 8 ? 'bg-cyan-500' : 'bg-slate-400'}`}></div>
         </div>
       </div>
 
       {/* 状态反馈胶囊 */}
-      <div
-        className={`text-xs px-3 py-3 rounded-xl border mb-4 flex items-start gap-2 transition-all duration-300 ${levelInfo.color}`}
-      >
+      <div className={`text-xs px-3 py-3 rounded-xl border mb-4 flex items-start gap-2 transition-all duration-300 ${levelInfo.color}`}>
         <Info size={14} className="shrink-0 mt-0.5 opacity-80" />
         <p className="font-bold tracking-wide">{levelInfo.text}</p>
       </div>
 
-      {/* 备注输入框 (防放大修复) */}
+      {/* 备注输入框 */}
       <div className="relative group/input">
-        <Edit3
-          size={14}
-          className="absolute left-4 top-4 text-slate-600 group-focus-within/input:text-blue-400 transition-colors"
-        />
+        <Edit3 size={14} className="absolute left-4 top-4 text-slate-600 group-focus-within/input:text-blue-400 transition-colors" />
         <input
           type="text"
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="有什么故事？(选填)"
-          // 🟢 [关键修复] text-base: 强制 16px 防止 iOS 自动放大
           className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl py-3.5 pl-10 pr-4 text-base text-slate-200 outline-none focus:border-blue-500/50 focus:bg-slate-900 transition-all placeholder:text-slate-600"
         />
       </div>
