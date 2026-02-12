@@ -28,7 +28,7 @@ import {
   X, HelpCircle, Calculator, ArrowRight, Heart, Smile, Fingerprint,
   Calendar as CalendarIcon, PenTool, Battery, Activity, LogOut, ChevronRight, LayoutDashboard,
   BrainCircuit, Lightbulb, History, MoreHorizontal, PlayCircle, Info, FolderOpen, Layers, Edit3,
-  ChevronLeft, BarChart2, CheckSquare, Target, Dumbbell, BookOpen, Home, WifiOff
+  ChevronLeft, BarChart2, CheckSquare, Target, Dumbbell, BookOpen, Home, WifiOff, Download, ShieldCheck
 } from 'lucide-react';
 
 // ==========================================
@@ -355,7 +355,7 @@ const App = () => {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isLocalMode, setIsLocalMode] = useState(false); // [New] Offline Mode State
-  
+  const [activeTab, setActiveTab] = useState('execution');
   const [tasks, setTasks] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [activeTaskId, setActiveTaskId] = useState(null);
@@ -504,6 +504,26 @@ const App = () => {
   const updateLocalTask = (taskId, updates) => {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
   };
+  // 🟢【插入这个新函数】
+  const handleExportJSON = () => {
+    // 打包所有数据
+    const data = { 
+      user: user?.uid, 
+      exportedAt: new Date().toISOString(), 
+      stats, tasks, reviews 
+    };
+    // 创建下载链接并自动点击
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `life-system-backup-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  // const handleTaskAction = ... (这是你原来的代码)
 
   const handleTaskAction = async (action, taskId, payload = null) => {
     if (!user) return;
@@ -520,10 +540,17 @@ const App = () => {
         }
     }
     if (action === 'complete') {
-        if (activeTaskId === taskId) setActiveTaskId(null);
-        updates.status = 'Completed';
-        updates.endTime = new Date().toISOString();
-    }
+      if (activeTaskId === taskId) setActiveTaskId(null);
+      updates.status = 'Completed';
+      updates.endTime = new Date().toISOString();
+
+      // 🟢【插入这段代码】影子价格自动结算逻辑
+      // 意思就是：如果你没填实际收入(actualRevenue)，但你设了预估值(estValue)，
+      // 系统就默认你赚到了这个预估值（比如健身1小时=200元）。
+      if (!task.actualRevenue && task.estValue > 0) {
+          updates.actualRevenue = task.estValue;
+      }
+  }
     if (action === 'delete') { 
       if (window.confirm('确认删除？')) {
         if (isLocalMode) setTasks(prev => prev.filter(t => t.id !== taskId));
@@ -650,6 +677,7 @@ const App = () => {
       <div className="max-w-4xl mx-auto p-4 space-y-8 mt-4">
         
         {/* BLOCK 1: Life Audit */}
+        {activeTab === 'audit' && (
         <section className="bg-white/5 border border-white/10 rounded-3xl p-6 relative overflow-hidden group hover:border-white/20 transition-all">
           <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none group-hover:opacity-10 transition-opacity duration-500"><Fingerprint size={120} /></div>
           <div className="flex items-center justify-between mb-6 relative z-10">
@@ -693,8 +721,10 @@ const App = () => {
              </div>
           )}
         </section>
+        )}
 
         {/* BLOCK 2: Task Execution */}
+        {activeTab === 'execution' && (
         <section className="bg-white/5 border border-white/10 rounded-3xl p-6 relative overflow-hidden group hover:border-white/20 transition-all">
            <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none group-hover:opacity-10 transition-opacity duration-500"><Activity size={120} /></div>
            <div className="flex items-center justify-between mb-6 relative z-10">
@@ -781,6 +811,33 @@ const App = () => {
             <div className="relative z-10"><CalendarView type="task" data={tasks} onSelectDate={openDailyReport} /></div>
           )}
         </section>
+        )}
+
+        {/* === Tab 3: Assets (新增的资产板块) === */}
+        {activeTab === 'assets' && (
+           <section className="bg-white/5 border border-white/10 rounded-3xl p-6 animate-fade-in">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2 mb-6"><ShieldCheck className="text-slate-400" size={20}/> 资产与数据</h2>
+                <div className="space-y-4">
+                    <div className="bg-black/40 p-4 rounded-xl border border-white/5 flex items-center justify-between">
+                        <div>
+                            <div className="font-bold text-white flex items-center gap-2"><Database size={16} className="text-blue-500"/> JSON 数据导出</div>
+                            <div className="text-xs text-slate-500 mt-1">将所有人生数据打包下载，确保数据主权。</div>
+                        </div>
+                        {/* 这里的 handleExportJSON 就是你刚才在第4步加的那个函数 */}
+                        <button onClick={handleExportJSON} className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 hover:text-white transition-colors"><Download size={18}/></button>
+                    </div>
+                    <div className="bg-black/40 p-4 rounded-xl border border-white/5 flex items-center justify-between">
+                        <div>
+                            <div className="font-bold text-white">账户状态</div>
+                            <div className="text-xs text-slate-500 mt-1">{isLocalMode ? '离线模式 (数据存储在浏览器)' : `已同步云端 (${user.email || 'Google User'})`}</div>
+                        </div>
+                        {isLocalMode && (
+                             <button onClick={() => { setUser(null); setIsLocalMode(false); }} className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg">去登录同步</button>
+                        )}
+                    </div>
+                </div>
+            </section>
+        )}
       </div>
 
       {/* Review Modal */}
@@ -998,6 +1055,29 @@ const App = () => {
             </div>
         </div>
       )}
+      {/* === 底部导航栏 === */}
+      <div className="fixed bottom-0 left-0 w-full bg-[#020617]/90 backdrop-blur-xl border-t border-white/10 px-6 py-2 z-40 md:hidden pb-safe">
+        <div className="flex justify-around items-center">
+            <button onClick={() => setActiveTab('execution')} className={`flex flex-col items-center gap-1 p-2 transition-colors ${activeTab === 'execution' ? 'text-blue-500' : 'text-slate-500'}`}>
+                <LayoutDashboard size={24} />
+                <span className="text-[10px] font-bold">作战</span>
+            </button>
+            
+            <div className="w-px h-8 bg-white/10"></div>
+
+            <button onClick={() => setActiveTab('audit')} className={`flex flex-col items-center gap-1 p-2 transition-colors ${activeTab === 'audit' ? 'text-rose-500' : 'text-slate-500'}`}>
+                <Heart size={24} />
+                <span className="text-[10px] font-bold">审计</span>
+            </button>
+
+             <div className="w-px h-8 bg-white/10"></div>
+
+            <button onClick={() => setActiveTab('assets')} className={`flex flex-col items-center gap-1 p-2 transition-colors ${activeTab === 'assets' ? 'text-slate-300' : 'text-slate-500'}`}>
+                <ShieldCheck size={24} />
+                <span className="text-[10px] font-bold">资产</span>
+            </button>
+        </div>
+      </div>
 
     </div>
   );
