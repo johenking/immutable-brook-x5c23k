@@ -150,60 +150,71 @@ const SHADOW_PRICES = {
 // ==========================================
 // 3. 核心定义
 // ==========================================
+// 👇👇👇 替换原来的 RATING_CRITERIA 👇👇👇
 const RATING_CRITERIA = {
   bioEnergy: {
     label: "生理能量",
-    icon: <Battery size={16} />,
+    icon: <Battery size={18} />,
     color: "emerald",
-    definition: "身体是革命的本钱。这是你对抗‘病魔缠身’遗憾的唯一底气。",
+    definition: "对抗熵增的底气。",
     levels: {
-      low: "🔴 濒临崩溃：生病、极度缺觉、身体沉重。",
-      mid: "🟡 维持运转：无明显不适，但容易犯困，精力平平。",
-      high: "🟢 满血状态：大脑清晰、精力充沛、运动表现极佳。",
+      1: "🔴 崩溃：生病/极度缺觉，系统停机。",
+      2: "🟠 挣扎：身体沉重，靠意志力硬撑。",
+      3: "🟡 维持：无病无痛，但精力平平。",
+      4: "🟢 充实：运动表现佳，大脑清晰。",
+      5: "💎 巅峰：精力无限，不知疲倦。",
     },
   },
   agency: {
     label: "自主权",
-    icon: <Fingerprint size={16} />,
+    icon: <Fingerprint size={18} />,
     color: "amber",
-    definition: "衡量你是否在过‘值得的一生’的核心。",
+    definition: "我命由我不由天。",
     levels: {
-      low: "🔴 提线木偶：全天被迫营业，被他人意志完全裹挟。",
-      mid: "🟡 半推半就：有一定选择权，但仍需处理大量不想做的事。",
-      high: "🟢 绝对掌控：核心决策由我做主，每件事都是我选择的。",
+      1: "🔴 奴役：全天被迫营业，像个提线木偶。",
+      2: "🟠 妥协：大部分时间在做不想做的事。",
+      3: "🟡 凡人：有选择，但被琐事缠身。",
+      4: "🟢 掌控：核心决策由我做主。",
+      5: "💎 主宰：每一分钟都是我自由意志的选择。",
     },
   },
   connection: {
     label: "深度链接",
-    icon: <Heart size={16} />,
+    icon: <Heart size={18} />,
     color: "rose",
-    definition: "留给亲人‘我不遗憾’的情感证据。",
+    definition: "爱的流动与回响。",
     levels: {
-      low: "🔴 孤岛状态：感到孤独、发生冲突、冷战或由于忙碌而封闭。",
-      mid: "🟡 点头之交：只有浅层的寒暄和事务性沟通，缺乏温度。",
-      high: "🟢 灵魂共振：与家人/爱人有深度交流，感到被理解和支持。",
+      1: "🔴 孤岛：冷战、冲突、完全封闭。",
+      2: "🟠 疏离：虽在一起，但心不在焉。",
+      3: "🟡 社交：正常的寒暄与事务性沟通。",
+      4: "🟢 温暖：感到被理解、被支持。",
+      5: "💎 共振：灵魂深处的同频，极致的爱。",
     },
   },
   flow: {
     label: "心流成长",
-    icon: <Activity size={16} />,
+    icon: <Activity size={18} />,
     color: "blue",
-    definition: "你在技能深耕或事业中获得的成就感。",
+    definition: "技能与挑战的完美平衡。",
     levels: {
-      low: "🔴 精神内耗：焦虑、拖延、刷手机虚度光阴，毫无产出。",
-      mid: "🟡 按部就班：完成了任务列表，但未进入深度思考状态。",
-      high: "🟢 忘我境界：全神贯注解决难题，感受到技能和认知的升级。",
+      1: "🔴 枯竭：焦虑、拖延、毫无产出。",
+      2: "🟠 阻滞：注意力涣散，效率极低。",
+      3: "🟡 搬砖：按部就班完成任务。",
+      4: "🟢 沉浸：专注解决难题，时间过得很快。",
+      5: "💎 忘我：人剑合一，创造力爆发。",
     },
   },
   awe: {
     label: "惊叹时刻",
-    icon: <Zap size={16} />,
+    icon: <Zap size={18} />,
     color: "purple",
-    definition: "防止陷入‘虽成功但不快乐’的陷阱。",
+    definition: "从生存模式切换到生活模式。",
     levels: {
-      low: "🔴 灰度模式：像机器人一样重复，对周围环境麻木无感。",
-      mid: "🟡 些许色彩：吃到一顿好饭，或看到好看的云，有一丝愉悦。",
-      high: "🟢 极致震撼：被艺术、自然或智慧击中，深感人间值得。",
+      1: "🔴 麻木：像机器人一样重复。",
+      2: "🟠 灰暗：对周围环境无感。",
+      3: "🟡 小确幸：吃到美食，看到晚霞。",
+      4: "🟢 触动：被艺术或智慧深深打动。",
+      5: "💎 神性：感受到宏大叙事，人间值得。",
     },
   },
 };
@@ -300,71 +311,142 @@ const TrendChart = ({ data, dataKey, color, height = 50 }) => {
   );
 };
 
+// 👇👇👇 替换原来的 AuditItem 组件 👇👇👇
 const AuditItem = ({ type, val, setVal, note, setNote }) => {
   const criteria = RATING_CRITERIA[type];
-  const colorMap = {
-    emerald: "accent-emerald-500 text-emerald-400",
-    amber: "accent-amber-500 text-amber-400",
-    rose: "accent-rose-500 text-rose-400",
-    blue: "accent-blue-500 text-blue-400",
-    purple: "accent-purple-500 text-purple-400",
-  };
 
-  const getFeedback = (v) => {
-    if (v <= 3)
+  // 核心逻辑：根据 1-10 分计算 5 个等级 (1-2, 3-4, 5-6, 7-8, 9-10)
+  const getLevelInfo = (v) => {
+    const score = Number(v);
+    if (score <= 2)
       return {
-        text: criteria.levels.low,
-        color: "text-rose-400 border-rose-500/30 bg-rose-500/10",
+        text: criteria.levels[1],
+        color:
+          "text-rose-500 bg-rose-500/10 border-rose-500/20 shadow-rose-900/20",
       };
-    if (v <= 7)
+    if (score <= 4)
       return {
-        text: criteria.levels.mid,
-        color: "text-amber-400 border-amber-500/30 bg-amber-500/10",
+        text: criteria.levels[2],
+        color:
+          "text-orange-400 bg-orange-500/10 border-orange-500/20 shadow-orange-900/20",
+      };
+    if (score <= 6)
+      return {
+        text: criteria.levels[3],
+        color:
+          "text-amber-300 bg-amber-500/10 border-amber-500/20 shadow-amber-900/20",
+      };
+    if (score <= 8)
+      return {
+        text: criteria.levels[4],
+        color:
+          "text-emerald-400 bg-emerald-500/10 border-emerald-500/20 shadow-emerald-900/20",
       };
     return {
-      text: criteria.levels.high,
-      color: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10",
+      text: criteria.levels[5],
+      color:
+        "text-cyan-300 bg-cyan-500/10 border-cyan-500/50 shadow-[0_0_15px_rgba(34,211,238,0.2)] animate-pulse",
     };
   };
 
-  const feedback = getFeedback(val);
+  const levelInfo = getLevelInfo(val);
 
   return (
-    <div className="bg-black/40 p-4 rounded-xl border border-white/5 transition-all hover:border-white/10">
-      <div className="flex justify-between items-center mb-3">
-        <div
-          className={`text-sm font-bold flex items-center gap-2 ${
-            colorMap[criteria.color].split(" ")[1]
-          }`}
-        >
-          {criteria.icon} {criteria.label}
+    <div className="bg-[#1e293b]/40 p-5 rounded-2xl border border-white/5 transition-all hover:border-white/10 group">
+      {/* 标题栏 */}
+      <div className="flex justify-between items-center mb-4">
+        <div className="flex items-center gap-2">
+          <div
+            className={`p-2 rounded-lg bg-slate-800 ${
+              criteria.color === "rose"
+                ? "text-rose-400"
+                : criteria.color === "amber"
+                ? "text-amber-400"
+                : criteria.color === "emerald"
+                ? "text-emerald-400"
+                : criteria.color === "blue"
+                ? "text-blue-400"
+                : "text-purple-400"
+            }`}
+          >
+            {criteria.icon}
+          </div>
+          <div>
+            <div className="text-sm font-bold text-slate-200">
+              {criteria.label}
+            </div>
+            <div className="text-[10px] text-slate-500">
+              {criteria.definition}
+            </div>
+          </div>
         </div>
-        <span className="font-mono font-bold text-xl text-white">{val}</span>
+        <div className="flex items-baseline gap-1">
+          <span
+            className={`font-mono text-2xl font-bold ${
+              levelInfo.color.split(" ")[0]
+            }`}
+          >
+            {val}
+          </span>
+          <span className="text-xs text-slate-600">/10</span>
+        </div>
       </div>
-      <input
-        type="range"
-        min="1"
-        max="10"
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        className={`w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer mb-3 ${
-          colorMap[criteria.color].split(" ")[0]
-        }`}
-      />
+
+      {/* 滑块区域 */}
+      <div className="relative h-6 mb-4 flex items-center">
+        <input
+          type="range"
+          min="1"
+          max="10"
+          step="0.5" // 👈 支持 0.5 分，更细腻
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer z-10 opacity-0 absolute inset-0"
+        />
+        {/* 自定义滑块轨道 UI */}
+        <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden relative border border-white/5">
+          <div
+            className={`h-full transition-all duration-300 ${
+              Number(val) > 8
+                ? "bg-gradient-to-r from-blue-500 to-cyan-400"
+                : Number(val) > 6
+                ? "bg-emerald-500"
+                : Number(val) > 4
+                ? "bg-amber-400"
+                : Number(val) > 2
+                ? "bg-orange-500"
+                : "bg-rose-500"
+            }`}
+            style={{ width: `${val * 10}%` }}
+          ></div>
+        </div>
+        {/* 滑块头 */}
+        <div
+          className="absolute h-5 w-5 bg-white rounded-full shadow-lg border-2 border-slate-900 pointer-events-none transition-all duration-100"
+          style={{ left: `calc(${val * 10}% - 10px)` }}
+        ></div>
+      </div>
+
+      {/* 状态反馈胶囊 */}
       <div
-        className={`text-xs px-3 py-2 rounded-lg border mb-3 flex items-start gap-2 ${feedback.color} transition-all duration-300`}
+        className={`text-xs px-3 py-2.5 rounded-xl border mb-3 flex items-start gap-2 transition-all duration-500 ${levelInfo.color}`}
       >
-        <Info size={14} className="shrink-0 mt-0.5" />
-        <p className="font-medium">{feedback.text}</p>
+        <Info size={14} className="shrink-0 mt-0.5 opacity-70" />
+        <p className="font-bold tracking-wide">{levelInfo.text}</p>
       </div>
-      <div className="relative">
-        <Edit3 size={12} className="absolute left-3 top-3 text-slate-500" />
+
+      {/* 备注输入框 */}
+      <div className="relative group/input">
+        <Edit3
+          size={12}
+          className="absolute left-3 top-3.5 text-slate-600 group-focus-within/input:text-blue-400 transition-colors"
+        />
         <input
           type="text"
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          placeholder={`评分依据：为什么是 ${val} 分？`}
-          className="w-full bg-slate-900/50 border border-slate-700/50 rounded-lg py-2.5 pl-8 pr-3 text-xs text-slate-300 outline-none focus:border-blue-500/50 transition-colors placeholder:text-slate-600"
+          placeholder="有什么故事？(选填)"
+          className="w-full bg-slate-900/30 border border-slate-700/30 rounded-xl py-3 pl-8 pr-3 text-xs text-slate-300 outline-none focus:border-blue-500/50 focus:bg-slate-900/80 transition-all placeholder:text-slate-700"
         />
       </div>
     </div>
@@ -1732,31 +1814,92 @@ const App = () => {
         )}
       </div>
 
-      {/* Review Modal */}
+      {/* Review Modal (动态仪表盘升级版) */}
       {showReviewModal && (
         <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm transition-opacity animate-fade-in"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/90 backdrop-blur-md transition-opacity animate-fade-in"
           onClick={() => setShowReviewModal(false)}
         >
           <div
-            className="bg-[#0f172a] border-t sm:border border-slate-800 sm:rounded-3xl p-6 w-full max-w-md shadow-2xl animate-slide-up max-h-[90vh] overflow-y-auto"
+            className="bg-[#0f172a] border-t sm:border border-slate-800 sm:rounded-3xl w-full max-w-md shadow-2xl animate-slide-up h-[90vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-6 sticky top-0 bg-[#0f172a] z-10 pb-2 border-b border-slate-800/50">
-              <h3 className="font-bold text-lg flex items-center gap-2">
-                <CalendarIcon className="text-amber-500" />{" "}
-                {reviewDate === new Date().toISOString().split("T")[0]
-                  ? "今日复盘"
-                  : `补录: ${reviewDate}`}
-              </h3>
-              <button
-                onClick={() => setShowReviewModal(false)}
-                className="p-1 bg-slate-800 rounded-full text-slate-400 hover:text-white"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="space-y-6">
+            {/* === 1. 顶部动态仪表盘 (核心升级) === */}
+            {(() => {
+              // 实时计算平均分
+              const avgScore = (
+                (Number(reviewForm.bioEnergy) +
+                  Number(reviewForm.agency) +
+                  Number(reviewForm.connection) +
+                  Number(reviewForm.flow) +
+                  Number(reviewForm.awe)) /
+                5
+              ).toFixed(1);
+
+              // 根据分数决定颜色和评语
+              let statusColor = "text-rose-500";
+              let statusBg = "bg-rose-500/10 border-rose-500/20";
+              let statusText = "🛑 系统崩溃";
+
+              if (avgScore >= 3) {
+                statusColor = "text-orange-400";
+                statusBg = "bg-orange-500/10 border-orange-500/20";
+                statusText = "⚠️ 艰难维持";
+              }
+              if (avgScore >= 5) {
+                statusColor = "text-yellow-400";
+                statusBg = "bg-yellow-500/10 border-yellow-500/20";
+                statusText = "⚓️ 平稳运行";
+              }
+              if (avgScore >= 7) {
+                statusColor = "text-emerald-400";
+                statusBg = "bg-emerald-500/10 border-emerald-500/20";
+                statusText = "🚀 状态极佳";
+              }
+              if (avgScore >= 9) {
+                statusColor = "text-cyan-400";
+                statusBg =
+                  "bg-cyan-500/10 border-cyan-500/50 shadow-[0_0_20px_rgba(34,211,238,0.3)]";
+                statusText = "💎 巅峰时刻";
+              }
+
+              return (
+                <div className="shrink-0 bg-[#0f172a] z-20 border-b border-slate-800 pb-4 pt-6 px-6 rounded-t-3xl relative overflow-hidden">
+                  {/* 背景光效 */}
+                  <div
+                    className={`absolute top-0 left-1/2 -translate-x-1/2 w-64 h-32 ${statusColor.replace(
+                      "text-",
+                      "bg-"
+                    )}/10 blur-[60px] pointer-events-none rounded-full`}
+                  ></div>
+
+                  <div className="flex justify-between items-start relative z-10">
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">
+                        今日综合状态
+                      </h3>
+                      <div
+                        className={`text-4xl font-mono font-bold transition-all duration-500 flex items-baseline gap-2 ${statusColor}`}
+                      >
+                        {avgScore}
+                        <span className="text-sm font-sans font-bold opacity-80 px-2 py-0.5 rounded-lg border bg-black/20 border-white/10">
+                          {statusText}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setShowReviewModal(false)}
+                      className="p-2 bg-slate-800/50 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* === 2. 可滚动的内容区 === */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
               <AuditItem
                 type="bioEnergy"
                 val={reviewForm.bioEnergy}
@@ -1796,24 +1939,39 @@ const App = () => {
                 note={reviewForm.aweNote}
                 setNote={(v) => setReviewForm({ ...reviewForm, aweNote: v })}
               />
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">
-                  One Line Chronicle
+
+              {/* 编年史输入区 (UI微调) */}
+              <div className="pt-4 border-t border-slate-800/50">
+                <label className="text-xs font-bold text-slate-400 uppercase mb-3 flex items-center gap-2">
+                  <PenTool size={12} /> 史官笔录 (One Line Chronicle)
                 </label>
-                <textarea
-                  value={reviewForm.highlight}
-                  onChange={(e) =>
-                    setReviewForm({ ...reviewForm, highlight: e.target.value })
-                  }
-                  className="w-full bg-black/40 border border-slate-800 rounded-xl p-3 text-sm h-24 outline-none focus:border-blue-500 text-slate-300 placeholder:text-slate-700"
-                  placeholder="记录下这天值得铭记的瞬间..."
-                />
+                <div className="relative">
+                  <textarea
+                    value={reviewForm.highlight}
+                    onChange={(e) =>
+                      setReviewForm({
+                        ...reviewForm,
+                        highlight: e.target.value,
+                      })
+                    }
+                    className="w-full bg-[#1e293b]/40 border border-slate-700/50 rounded-2xl p-4 text-sm h-32 outline-none focus:border-purple-500/50 focus:bg-[#1e293b]/60 text-slate-200 placeholder:text-slate-600 transition-all resize-none leading-relaxed"
+                    placeholder="此刻，有什么值得被写进你的人生传记里？..."
+                  />
+                  {/* 装饰性角标 */}
+                  <div className="absolute bottom-3 right-3 opacity-30">
+                    <History size={16} />
+                  </div>
+                </div>
               </div>
+            </div>
+
+            {/* === 3. 底部固定按钮 === */}
+            <div className="p-6 pt-2 bg-[#0f172a] border-t border-slate-800 z-20">
               <button
                 onClick={submitReview}
-                className="w-full py-4 bg-gradient-to-r from-amber-600 to-rose-600 rounded-xl font-bold text-white shadow-lg shadow-rose-900/20 active:scale-95 transition-transform"
+                className="w-full py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 rounded-2xl font-bold text-white shadow-lg shadow-blue-900/20 active:scale-95 transition-all flex items-center justify-center gap-2 text-base tracking-wide"
               >
-                确认归档
+                <CheckCircle2 size={20} /> 确认今日归档
               </button>
             </div>
           </div>
