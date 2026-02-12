@@ -311,11 +311,10 @@ const TrendChart = ({ data, dataKey, color, height = 50 }) => {
   );
 };
 
-// 👇👇👇 替换原来的 AuditItem 组件 👇👇👇
+// 👇👇👇 替换原来的 AuditItem 组件 (手感顺滑修复版) 👇👇👇
 const AuditItem = ({ type, val, setVal, note, setNote }) => {
   const criteria = RATING_CRITERIA[type];
 
-  // 核心逻辑：根据 1-10 分计算 5 个等级 (1-2, 3-4, 5-6, 7-8, 9-10)
   const getLevelInfo = (v) => {
     const score = Number(v);
     if (score <= 2)
@@ -352,12 +351,12 @@ const AuditItem = ({ type, val, setVal, note, setNote }) => {
   const levelInfo = getLevelInfo(val);
 
   return (
-    <div className="bg-[#1e293b]/40 p-5 rounded-2xl border border-white/5 transition-all hover:border-white/10 group">
+    <div className="bg-[#1e293b]/40 p-5 rounded-2xl border border-white/5 transition-all hover:border-white/10 group relative">
       {/* 标题栏 */}
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-2">
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex items-center gap-3">
           <div
-            className={`p-2 rounded-lg bg-slate-800 ${
+            className={`p-2.5 rounded-xl bg-slate-800 shadow-inner ${
               criteria.color === "rose"
                 ? "text-rose-400"
                 : criteria.color === "amber"
@@ -375,38 +374,43 @@ const AuditItem = ({ type, val, setVal, note, setNote }) => {
             <div className="text-sm font-bold text-slate-200">
               {criteria.label}
             </div>
-            <div className="text-[10px] text-slate-500">
+            <div className="text-[10px] text-slate-500 leading-tight mt-0.5">
               {criteria.definition}
             </div>
           </div>
         </div>
         <div className="flex items-baseline gap-1">
           <span
-            className={`font-mono text-2xl font-bold ${
+            className={`font-mono text-3xl font-bold tracking-tighter ${
               levelInfo.color.split(" ")[0]
             }`}
           >
             {val}
           </span>
-          <span className="text-xs text-slate-600">/10</span>
+          <span className="text-xs text-slate-600 font-bold">/10</span>
         </div>
       </div>
 
-      {/* 滑块区域 */}
-      <div className="relative h-6 mb-4 flex items-center">
+      {/* 滑块区域 (核心修复区) */}
+      <div className="relative h-12 flex items-center mb-4 select-none touch-none">
+        {/* 🟢 [关键修复] touch-none: 禁止在此区域触发页面滚动，解决卡顿 */}
+
         <input
           type="range"
           min="1"
           max="10"
-          step="0.5" // 👈 支持 0.5 分，更细腻
+          step="0.5"
           value={val}
           onChange={(e) => setVal(e.target.value)}
-          className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer z-10 opacity-0 absolute inset-0"
+          // 🟢 [关键修复] opacity-0 + absolute inset-0 + z-20: 让真正的滑块铺满整个区域并置顶
+          className="absolute inset-0 w-full h-full opacity-0 z-20 cursor-pointer active:cursor-grabbing"
+          style={{ touchAction: "none" }} // 双重保险禁止滚动
         />
-        {/* 自定义滑块轨道 UI */}
-        <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden relative border border-white/5">
+
+        {/* 自定义滑块轨道 UI (视觉层，不参与交互) */}
+        <div className="w-full h-3 bg-slate-800/80 rounded-full overflow-hidden relative border border-white/5 pointer-events-none">
           <div
-            className={`h-full transition-all duration-300 ${
+            className={`h-full transition-all duration-100 ease-out ${
               Number(val) > 8
                 ? "bg-gradient-to-r from-blue-500 to-cyan-400"
                 : Number(val) > 6
@@ -420,33 +424,41 @@ const AuditItem = ({ type, val, setVal, note, setNote }) => {
             style={{ width: `${val * 10}%` }}
           ></div>
         </div>
-        {/* 滑块头 */}
+
+        {/* 自定义滑块头 (跟随移动) */}
         <div
-          className="absolute h-5 w-5 bg-white rounded-full shadow-lg border-2 border-slate-900 pointer-events-none transition-all duration-100"
-          style={{ left: `calc(${val * 10}% - 10px)` }}
-        ></div>
+          className="absolute h-6 w-6 bg-white rounded-full shadow-[0_2px_10px_rgba(0,0,0,0.5)] border-4 border-[#0f172a] pointer-events-none transition-all duration-100 ease-out flex items-center justify-center z-10"
+          style={{ left: `calc(${val * 10}% - 12px)` }}
+        >
+          <div
+            className={`w-1.5 h-1.5 rounded-full ${
+              Number(val) > 8 ? "bg-cyan-500" : "bg-slate-400"
+            }`}
+          ></div>
+        </div>
       </div>
 
       {/* 状态反馈胶囊 */}
       <div
-        className={`text-xs px-3 py-2.5 rounded-xl border mb-3 flex items-start gap-2 transition-all duration-500 ${levelInfo.color}`}
+        className={`text-xs px-3 py-3 rounded-xl border mb-4 flex items-start gap-2 transition-all duration-300 ${levelInfo.color}`}
       >
-        <Info size={14} className="shrink-0 mt-0.5 opacity-70" />
+        <Info size={14} className="shrink-0 mt-0.5 opacity-80" />
         <p className="font-bold tracking-wide">{levelInfo.text}</p>
       </div>
 
-      {/* 备注输入框 */}
+      {/* 备注输入框 (防放大修复) */}
       <div className="relative group/input">
         <Edit3
-          size={12}
-          className="absolute left-3 top-3.5 text-slate-600 group-focus-within/input:text-blue-400 transition-colors"
+          size={14}
+          className="absolute left-4 top-4 text-slate-600 group-focus-within/input:text-blue-400 transition-colors"
         />
         <input
           type="text"
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="有什么故事？(选填)"
-          className="w-full bg-slate-900/30 border border-slate-700/30 rounded-xl py-3 pl-8 pr-3 text-xs text-slate-300 outline-none focus:border-blue-500/50 focus:bg-slate-900/80 transition-all placeholder:text-slate-700"
+          // 🟢 [关键修复] text-base: 强制 16px 防止 iOS 自动放大
+          className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl py-3.5 pl-10 pr-4 text-base text-slate-200 outline-none focus:border-blue-500/50 focus:bg-slate-900 transition-all placeholder:text-slate-600"
         />
       </div>
     </div>
@@ -1954,7 +1966,7 @@ const App = () => {
                         highlight: e.target.value,
                       })
                     }
-                    className="w-full bg-[#1e293b]/40 border border-slate-700/50 rounded-2xl p-4 text-sm h-32 outline-none focus:border-purple-500/50 focus:bg-[#1e293b]/60 text-slate-200 placeholder:text-slate-600 transition-all resize-none leading-relaxed"
+                    className="w-full bg-[#1e293b]/40 border border-slate-700/50 rounded-2xl p-4 text-base h-32 outline-none focus:border-purple-500/50 focus:bg-[#1e293b]/60 text-slate-200 placeholder:text-slate-600 transition-all resize-none leading-relaxed"
                     placeholder="此刻，有什么值得被写进你的人生传记里？..."
                   />
                   {/* 装饰性角标 */}
