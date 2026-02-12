@@ -1672,7 +1672,7 @@ const handleTaskAction = async (action, taskId, payload = null) => {
                 {/* 任务分组渲染 */}
                 {/* 👇👇👇 第二步：任务列表渲染 (实时金币 + 经验值 + 悬赏模式) 👇👇👇 */}
               {groupedTasks.map((group) => {
-                const isCollapsed = collapsedGroups[group.name];
+                const isCollapsed = expandedGroups[group.name];
 
                 return (
                   <div key={group.name} className="space-y-3">
