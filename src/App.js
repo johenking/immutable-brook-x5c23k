@@ -690,7 +690,7 @@ const App = () => {
   const [auditViewMode, setAuditViewMode] = useState("trends");
   const [taskViewMode, setTaskViewMode] = useState("list");
   const [targetDate, setTargetDate] = useState(null); // [新增] 用于记录补录的目标日期
-
+  
   // 👇👇👇 1. 智能折叠状态 (改为记录“谁展开了”，默认全关) 👇👇👇
   const [expandedGroups, setExpandedGroups] = useState({});
 
@@ -965,108 +965,118 @@ const App = () => {
     a.click();
     document.body.removeChild(a);
   };
+// 👇👇👇 第一步修复：替换后的 handleTaskAction 👇👇👇
+  const handleTaskAction = async (action, taskId, payload = null) => {
+    if (!user) return;
 
- // 👇👇👇 最终修复版 handleTaskAction (暂停、完成均强制存档，拒绝清零) 👇👇👇
- const handleTaskAction = async (action, taskId, payload = null) => {
-  if (!user) return;
-  
-  // 1. 获取当前内存中的最新任务状态 (包含刚刚跑出来的 duration)
-  const task = tasks.find((t) => t.id === taskId);
-  if (!task) return; 
+    // 1. 获取当前内存中的最新任务状态
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
 
-  const updates = {};
+    const updates = {};
 
-  // --- 动作 1: 开始/暂停 (Toggle) ---
-  if (action === "toggle") {
-    if (activeTaskId === taskId) {
-      // 🛑 情况 A: 正在进行 -> 暂停
-      setActiveTaskId(null);
-      updates.status = "Pending";
-      
-      // 🚨🚨🚨 核心修复：暂停时也要存档！🚨🚨🚨
-      // 把内存里的时间写入数据库，防止被云端旧数据覆盖
-      updates.duration = task.duration || 0; 
-      
-    } else {
-      // ▶️ 情况 B: 暂停/未开始 -> 开始
-      setActiveTaskId(taskId);
-      updates.status = "In Progress";
+    // --- 动作 1: 开始/暂停 (Toggle) ---
+    if (action === "toggle") {
+      if (activeTaskId === taskId) {
+        // 🛑 正在进行 -> 暂停
+        setActiveTaskId(null);
+        updates.status = "Pending";
+        // 核心修复：暂停时存档当前跑出来的时间
+        updates.duration = task.duration || 0;
+      } else {
+        // ▶️ 暂停/未开始 -> 开始
+        setActiveTaskId(taskId);
+        updates.status = "In Progress";
+        
+        // 🟢【修复点A】: 如果是从“已完成”状态直接点播放“复活”，必须清空已结算金额
+        // 否则系统会认为这笔钱已经算死了，不会随时间增加
+        if (task.status === "Completed") {
+            updates.actualRevenue = null; 
+            updates.endTime = null;
+        }
+      }
     }
-  }
 
-  // --- 动作 2: 完成任务 (Complete) ---
-  if (action === "complete") {
-    if (activeTaskId === taskId) setActiveTaskId(null); // 停止计时
-    updates.status = "Completed";
-    updates.endTime = new Date().toISOString();
-    
-    // 🚨🚨🚨 核心修复：完成时强制存档 🚨🚨🚨
-    updates.duration = task.duration || 0; 
+    // --- 动作 2: 完成任务 (Complete) ---
+    if (action === "complete") {
+      if (activeTaskId === taskId) setActiveTaskId(null); // 停止计时
+      updates.status = "Completed";
+      updates.endTime = new Date().toISOString();
+      updates.duration = task.duration || 0; // 强制存档时间
 
-    // 自动结算金币
-    if (!task.actualRevenue) {
-       if (task.mode === 'bounty') {
+      // 自动结算金币 (只在没有手动修改过金额的情况下执行)
+      if (!task.actualRevenue) {
+        if (task.mode === "bounty") {
           updates.actualRevenue = task.fixedReward || 0;
-       } else if (task.hourlyRate > 0 && (task.duration || 0) > 0) {
-          updates.actualRevenue = ((task.duration / 3600) * task.hourlyRate);
-       }
+        } else if (task.hourlyRate > 0 && (task.duration || 0) > 0) {
+          // 正常的时薪结算写入
+          updates.actualRevenue = (task.duration / 3600) * task.hourlyRate;
+        }
+      }
     }
-  }
 
-  // --- 动作 3: 删除任务 ---
-  if (action === "delete") {
-    if (window.confirm("确认删除？")) {
-      if (isLocalMode)
-        setTasks((prev) => prev.filter((t) => t.id !== taskId));
-      else
-        await deleteDoc(
-          doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId)
+    // --- 动作 3: 删除任务 ---
+    if (action === "delete") {
+      if (window.confirm("确认删除？")) {
+        if (isLocalMode)
+          setTasks((prev) => prev.filter((t) => t.id !== taskId));
+        else
+          await deleteDoc(
+            doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId)
+          );
+      }
+      return;
+    }
+
+    // --- 动作 4: 撤销完成 (Revert) ---
+    if (action === "revert") {
+      updates.status = "Pending"; // 变回待办
+      updates.endTime = null;     // 清除完成时间
+      
+      // 🟢【修复点B】: 核心！必须把“写死”的金额抹掉，变回 null
+      // 这样前端渲染时，就会重新走 ((duration / 3600) * hourlyRate) 的实时公式
+      updates.actualRevenue = null; 
+    }
+
+    // --- 动作 5: 手动修改金额 ---
+    if (action === "revenue") {
+      updates.actualRevenue = Number(revenueInput);
+    }
+
+    // --- 动作 6: 补录/调整时间 ---
+    if (action === "adjust") {
+      const currentDuration = task.duration || 0;
+      const currentRevenue = task.actualRevenue || 0;
+
+      const newDuration = currentDuration + Number(payload.addMinutes) * 60;
+      
+      // 更新时间
+      updates.duration = newDuration;
+      
+      // 如果之前已经有收益，就在基础上加；如果没有，就保持 null 让它动态算
+      if (task.actualRevenue || payload.addRevenue > 0) {
+          updates.actualRevenue = currentRevenue + Number(payload.addRevenue);
+      }
+
+      if (payload.shouldStart) {
+        updates.status = "In Progress";
+        setActiveTaskId(taskId);
+      }
+      setShowAdjustModal(false);
+    }
+
+    // --- 统一提交更新 ---
+    if (Object.keys(updates).length > 0) {
+      if (isLocalMode) {
+        updateLocalTask(taskId, updates);
+      } else {
+        await updateDoc(
+          doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId),
+          updates
         );
+      }
     }
-    return;
-  }
-
-  // --- 动作 4: 撤销完成 ---
-  if (action === "revert") {
-    updates.status = "Pending";
-    updates.endTime = null;
-  }
-
-  // --- 动作 5: 手动修改金额 ---
-  if (action === "revenue") {
-    updates.actualRevenue = Number(revenueInput);
-  }
-
-  // --- 动作 6: 补录/调整时间 ---
-  if (action === "adjust") {
-    const currentDuration = task.duration || 0;
-    const currentRevenue = task.actualRevenue || 0;
-    
-    const newDuration = currentDuration + Number(payload.addMinutes) * 60;
-    const newRevenue = currentRevenue + Number(payload.addRevenue);
-    
-    updates.duration = newDuration;
-    updates.actualRevenue = newRevenue;
-    
-    if (payload.shouldStart) {
-      updates.status = "In Progress";
-      setActiveTaskId(taskId);
-    }
-    setShowAdjustModal(false);
-  }
-
-  // --- 统一提交更新 ---
-  if (Object.keys(updates).length > 0) {
-    if (isLocalMode) {
-      updateLocalTask(taskId, updates);
-    } else {
-      await updateDoc(
-        doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId),
-        updates
-      );
-    }
-  }
-};
+  };
 
   // 👇👇👇 这里的代码完全替换原来的 addTask 函数 👇👇👇
   // 👇👇👇 替换原来的 addTask 函数 (RPG 逻辑升级版) 👇👇👇
@@ -1660,58 +1670,61 @@ const App = () => {
                 )}
 
                 {/* 任务分组渲染 */}
-               {/* 👇👇👇 任务分组渲染 (清爽作战室版：智能折叠 + 严格布局) 👇👇👇 */}
+                {/* 👇👇👇 第二步：任务列表渲染 (实时金币 + 经验值 + 悬赏模式) 👇👇👇 */}
               {groupedTasks.map((group) => {
-                // 逻辑反转：现在 expandedGroups 记录展开的，没记录就是折叠
-                const isExpanded = expandedGroups[group.name];
+                const isCollapsed = collapsedGroups[group.name];
 
                 return (
                   <div key={group.name} className="space-y-3">
                     {/* 分组标题栏 */}
                     <div
-                      className="flex items-center gap-2 px-1 mb-2 cursor-pointer hover:opacity-80 transition-opacity select-none"
+                      className="flex items-center gap-2 px-1 mb-2 cursor-pointer hover:opacity-80 transition-opacity"
                       onClick={() => toggleGroup(group.name)}
                     >
-                      <div className={`p-1.5 rounded-lg border border-white/5 transition-colors ${isExpanded ? "bg-blue-500/20 text-blue-400" : "bg-slate-800/80 text-slate-500"}`}>
-                        {isExpanded ? <FolderOpen size={14} /> : <FolderOpen size={14} />}
+                      <div className="p-1.5 bg-slate-800/80 rounded-lg border border-white/5">
+                        <FolderOpen size={14} className="text-blue-400" />
                       </div>
-                      <h3 className={`text-xs font-bold uppercase tracking-widest flex-shrink-0 ${isExpanded ? "text-slate-200" : "text-slate-500"}`}>
+                      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex-shrink-0">
                         {group.name}
                       </h3>
                       <div
                         className={`text-slate-500 transition-transform duration-300 ${
-                          isExpanded ? "rotate-0" : "-rotate-90"
+                          isCollapsed ? "-rotate-90" : "rotate-0"
                         }`}
                       >
                         <ChevronDown size={14} />
                       </div>
                       <div className="h-px bg-slate-800 flex-1 ml-2"></div>
-                      
-                      {/* 分组摘要 (折叠时显示，展开时也可以显示) */}
                       <span className="text-[10px] text-slate-600 font-mono bg-slate-900/50 px-2 py-1 rounded-lg border border-white/5">
                         {formatTime(group.totalTime)} · ¥{group.totalRev.toFixed(0)}
                       </span>
                     </div>
 
-                    {/* 任务卡片列表 (只在展开时渲染) */}
-                    {isExpanded && (
-                      <div className="space-y-2 animate-slide-up origin-top">
+                    {/* 任务卡片列表 */}
+                    {!isCollapsed && (
+                      <div className="space-y-3 animate-fade-in origin-top">
                         {group.tasks.map((task) => {
                           const isCompleted = task.status === "Completed";
                           const isActive = activeTaskId === task.id;
                           const isBounty = task.mode === 'bounty';
                           const xpType = task.xpType || 'work';
 
-                          // 数据计算 (保持不变)
+                          // 🟢 1. 实时计算：当前已赚取的金额 (Real-time Revenue)
                           let currentRevenue = 0;
                           if (task.actualRevenue) {
-                             currentRevenue = task.actualRevenue; 
+                             currentRevenue = task.actualRevenue; // 如果已核算，显示核算值
                           } else if (isBounty) {
-                             currentRevenue = 0; 
+                             currentRevenue = 0; // 悬赏任务没做完前显示 0
                           } else {
+                             // 计时模式：(当前秒数 / 3600) * 时薪
                              currentRevenue = ((task.duration || 0) / 3600) * (task.hourlyRate || 0);
                           }
+
+                          // 🟣 2. 实时计算：当前已获得的经验 (Real-time XP)
+                          // 逻辑：(分钟数) * 倍率 (向下取整，更有获得感)
                           const currentXP = Math.floor(((task.duration || 0) / 60) * (task.expMult || 1));
+
+                          // 🔴 3. 判断时间负债
                           const taskHours = (task.duration || 0) / 3600;
                           const realHourlyRate = taskHours > 0 ? currentRevenue / taskHours : 0;
                           const isTimeDebt = !isBounty && isCompleted && taskHours > 0 && realHourlyRate < HOURLY_THRESHOLD;
@@ -1719,139 +1732,143 @@ const App = () => {
                           return (
                             <div
                               key={task.id}
-                              className={`relative group overflow-hidden rounded-xl border transition-all duration-200 ${
+                              className={`relative group overflow-hidden rounded-2xl border transition-all duration-300 ${
                                 isActive
-                                  ? "bg-blue-900/10 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]"
+                                  ? "bg-blue-900/10 border-blue-500/50 shadow-[0_0_20px_rgba(59,130,246,0.15)]"
                                   : isTimeDebt
-                                  ? "bg-rose-950/10 border-rose-500/30"
-                                  : "bg-[#1e293b]/40 border-white/5 hover:bg-[#1e293b]/60"
+                                  ? "bg-rose-950/10 border-rose-500/30 hover:border-rose-500/50"
+                                  : "bg-[#1e293b]/40 border-white/5 hover:border-white/10 hover:bg-[#1e293b]/60"
                               }`}
                             >
-                              {/* 激活光效条 */}
-                              {isActive && <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 animate-pulse"></div>}
+                              {/* 激活光效 */}
+                              {isActive && (
+                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 animate-pulse shadow-[0_0_10px_#3b82f6]"></div>
+                              )}
                               
-                              {/* === 卡片主体布局 (Grid) === */}
-                              <div className="p-3 flex items-center justify-between gap-3">
-                                
-                                {/* 左侧：信息区 (占据剩余空间) */}
-                                <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-                                  {/* 第一行：标签 + 标题 */}
-                                  <div className="flex items-center gap-2">
-                                    {xpType === 'growth' && <span className="shrink-0 text-[9px] font-bold bg-purple-500/20 text-purple-300 px-1.5 rounded border border-purple-500/30">进化</span>}
-                                    {xpType === 'maintenance' && <span className="shrink-0 text-[9px] font-bold bg-emerald-500/20 text-emerald-300 px-1.5 rounded border border-emerald-500/30">维持</span>}
-                                    {isBounty && <span className="shrink-0 text-[9px] font-bold bg-amber-500/20 text-amber-300 px-1.5 rounded border border-amber-500/30">悬赏</span>}
-                                    
-                                    <h4 className={`font-bold text-sm truncate ${isCompleted ? "text-slate-500 line-through" : "text-slate-200"}`}>
+                              <div className="p-4 flex flex-row items-center justify-between gap-3">
+                                {/* 左侧信息 */}
+                                <div className="flex-1 min-w-0">
+                                  {/* 标题 & 标签行 */}
+                                  <div className="flex items-center gap-2 mb-2.5 flex-wrap">
+                                    {/* 经验标签 */}
+                                    {xpType === 'growth' && <span className="text-[9px] font-bold bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded border border-purple-500/30">🟣 进化</span>}
+                                    {xpType === 'maintenance' && <span className="text-[9px] font-bold bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30">🟢 维持</span>}
+                                    {isBounty && <span className="text-[9px] font-bold bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">🏆 悬赏</span>}
+
+                                    <h4 className={`font-bold text-base truncate ${isCompleted ? "text-slate-400 line-through decoration-slate-700" : "text-slate-100"}`}>
                                       {task.title}
                                     </h4>
                                   </div>
 
-                                  {/* 第二行：数据胶囊 (固定高度，防止跳动) */}
-                                  <div className="flex items-center gap-2">
-                                    {/* ⏱️ 时长 */}
-                                    <div 
+                                  {/* 数据胶囊行 (动态核心) */}
+                                  <div className="flex flex-wrap gap-2">
+                                    
+                                    {/* ⏱️ 1. 实时时长 (带秒) */}
+                                    <button
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         setAdjustTaskData({ id: task.id, addMinutes: 0, addRevenue: 0 });
                                         setShowAdjustModal(true);
                                       }}
-                                      className={`cursor-pointer px-2 py-1 rounded-md border text-[10px] font-mono flex items-center gap-1 transition-colors ${
-                                        isActive ? "text-blue-300 border-blue-500/30 bg-blue-500/10" : "text-slate-500 border-white/5 bg-black/20"
+                                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-mono transition-colors ${
+                                        isActive ? "text-blue-300 border-blue-500/30 bg-blue-500/10" : "bg-black/20 border-white/5 text-slate-400"
                                       }`}
                                     >
-                                      <Clock size={10} className={isActive ? "animate-spin-slow" : ""} />
+                                      <Clock size={12} className={isActive ? "animate-spin-slow" : ""} />
                                       {formatTime(task.duration)}
+                                    </button>
+
+                                    {/* 💰 2. 实时金币 (Active Revenue) */}
+                                    {(currentRevenue > 0 || isBounty) && (
+                                      <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-mono ${
+                                          isBounty && !isCompleted 
+                                          ? "text-amber-400 border-amber-500/30 bg-amber-500/10" // 悬赏锁定态 (金色)
+                                          : "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" // 实时进账态 (绿色)
+                                      }`}>
+                                        <span className="font-sans opacity-50">¥</span>
+                                        {isBounty && !isCompleted 
+                                            ? task.fixedReward // 悬赏模式显示总赏金
+                                            : currentRevenue.toFixed(2) // 计时模式显示小数点后两位
+                                        }
+                                        {isBounty && !isCompleted && <Target size={10} className="ml-1 opacity-50" />}
+                                      </div>
+                                    )}
+
+                                    {/* ✨ 3. 实时经验 (Live XP) */}
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-purple-500/30 bg-purple-500/10 text-purple-300 text-xs font-mono">
+                                       <span className="font-sans">✨</span>
+                                       {currentXP} XP
                                     </div>
 
-                                    {/* 💰 金额 (点击核算) */}
-                                    {/* 无论是进行中还是已完成，结构保持一致 */}
-                                    <div 
-                                      onClick={(e) => {
-                                         if(isCompleted) {
-                                            e.stopPropagation();
-                                            setEditRevenueId(task.id);
-                                            setRevenueInput(task.actualRevenue);
-                                         }
-                                      }}
-                                      className={`px-2 py-1 rounded-md border text-[10px] font-mono flex items-center gap-1 transition-colors ${
-                                        isCompleted ? "cursor-pointer hover:border-emerald-500/50" : ""
-                                      } ${
-                                        isTimeDebt ? "text-rose-400 border-rose-500/30 bg-rose-500/10" :
-                                        (currentRevenue > 0 || isBounty) ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" :
-                                        "text-slate-600 border-white/5 bg-black/20"
-                                      }`}
-                                    >
-                                       {editRevenueId === task.id ? (
-                                          // 编辑模式 (输入框)
-                                          <div className="flex items-center gap-1">
-                                             <input 
-                                                autoFocus
-                                                type="number" 
-                                                className="w-12 bg-transparent outline-none text-white p-0 m-0"
-                                                value={revenueInput}
-                                                onChange={(e) => setRevenueInput(e.target.value)}
-                                                onBlur={() => { handleTaskAction("revenue", task.id); setEditRevenueId(null); }}
-                                                onKeyDown={(e) => { if(e.key === 'Enter') { handleTaskAction("revenue", task.id); setEditRevenueId(null); } }}
-                                             />
-                                          </div>
-                                       ) : (
-                                          // 展示模式
-                                          <>
-                                             <span className="font-sans opacity-50">¥</span>
-                                             {isBounty && !isCompleted ? task.fixedReward : currentRevenue.toFixed(2)}
-                                          </>
-                                       )}
-                                    </div>
-
-                                    {/* ✨ 经验 */}
-                                    <div className="px-2 py-1 rounded-md border border-purple-500/20 bg-purple-500/5 text-purple-300 text-[10px] font-mono flex items-center gap-1">
-                                       <Zap size={10} /> {currentXP}
-                                    </div>
                                   </div>
                                 </div>
 
-                                {/* 右侧：控制台 (固定宽度，不换行) */}
-                                <div className="flex items-center gap-1 shrink-0">
+                                {/* 右侧操作按钮 (保持不变) */}
+                                <div className="flex items-center gap-2 pl-2">
                                   {task.status !== "Completed" ? (
                                     <>
                                       <button
                                         onClick={() => handleTaskAction("toggle", task.id)}
-                                        className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                                        className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all ${
                                           isActive
                                             ? "bg-amber-500 text-slate-900 shadow-lg shadow-amber-500/20 active:scale-95"
-                                            : "bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white"
+                                            : "bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white border border-white/5"
                                         }`}
                                       >
-                                        {isActive ? <Square size={14} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
+                                        {isActive ? <Square size={18} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-0.5" />}
                                       </button>
                                       <button
                                         onClick={() => handleTaskAction("complete", task.id)}
-                                        className="w-9 h-9 rounded-xl bg-white/5 text-emerald-500 flex items-center justify-center hover:bg-emerald-500/10 transition-all active:scale-95"
+                                        className="w-11 h-11 rounded-xl bg-white/5 border border-white/5 text-emerald-500 flex items-center justify-center hover:bg-emerald-500/10 hover:border-emerald-500/50 transition-all active:scale-95"
                                       >
-                                        <CheckCircle2 size={18} />
+                                        <CheckCircle2 size={22} />
                                       </button>
                                     </>
                                   ) : (
-                                    <>
-                                       <button 
-                                          onClick={() => handleTaskAction("revert", task.id)} 
-                                          className="w-9 h-9 rounded-xl bg-slate-800/50 text-slate-500 flex items-center justify-center hover:text-blue-400 transition-all"
-                                          title="撤销完成"
-                                       >
-                                          <Undo2 size={16} />
-                                       </button>
-                                    </>
+                                    <div className="flex items-center gap-1">
+                                      {/* 核算与撤销按钮 */}
+                                       {editRevenueId === task.id ? (
+                                        <div className="flex items-center gap-1 animate-fade-in mr-1">
+                                          <input
+                                            type="number"
+                                            value={revenueInput}
+                                            onChange={(e) => setRevenueInput(e.target.value)}
+                                            className="w-16 bg-black/50 border border-blue-500 rounded-lg text-xs px-2 py-2 text-white outline-none font-mono"
+                                            autoFocus
+                                            placeholder="0"
+                                          />
+                                          <button
+                                            onClick={() => {
+                                              handleTaskAction("revenue", task.id);
+                                              setEditRevenueId(null);
+                                            }}
+                                            className="bg-blue-600 text-white text-xs px-3 py-2 rounded-lg font-bold"
+                                          >
+                                            OK
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          onClick={() => {
+                                            setEditRevenueId(task.id);
+                                            setRevenueInput(task.actualRevenue);
+                                          }}
+                                          className={`mr-1 px-3 py-1.5 rounded-lg border text-xs font-mono transition-all ${
+                                            isTimeDebt
+                                              ? "border-rose-500/30 text-rose-400 bg-rose-500/10"
+                                              : task.actualRevenue
+                                              ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/10"
+                                              : "border-dashed border-slate-700 text-slate-500 hover:border-slate-500"
+                                          }`}
+                                        >
+                                          {task.actualRevenue ? `¥${task.actualRevenue}` : "核算?"}
+                                        </button>
+                                      )}
+                                       <button onClick={() => handleTaskAction("revert", task.id)} className="w-10 h-10 rounded-lg bg-slate-800/50 text-slate-500 flex items-center justify-center hover:text-blue-400"><Undo2 size={18} /></button>
+                                    </div>
                                   )}
-                                  
-                                  {/* 删除按钮 (统一大小) */}
-                                  <button 
-                                    onClick={() => handleTaskAction("delete", task.id)} 
-                                    className="w-9 h-9 flex items-center justify-center text-slate-600 hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all"
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
+                                  <button onClick={() => handleTaskAction("delete", task.id)} className="w-10 h-10 flex items-center justify-center text-slate-700 hover:text-rose-500 rounded-lg"><Trash2 size={18} /></button>
                                 </div>
-
                               </div>
                             </div>
                           );
