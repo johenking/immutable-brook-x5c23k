@@ -474,6 +474,25 @@ const AuditItem = ({ type, val, setVal, note, setNote }) => {
 
 // --- Calendar ---
 const CalendarView = ({ type, data, onSelectDate }) => {
+  // 👇👇👇 补上这段缺失的逻辑，白屏立刻就好 👇👇👇
+  const [showUserMenu, setShowUserMenu] = useState(false); // 1. 控制菜单开关
+
+  const playerStats = useMemo(() => {
+    // 2. 计算 RPG 等级
+    const totalXP = Math.floor(stats.totalDurationHrs * 60);
+    const level = Math.floor(totalXP / 1000) + 1;
+    const currentLevelXP = totalXP % 1000;
+    const nextLevelXP = 1000;
+    const progress = (currentLevelXP / nextLevelXP) * 100;
+
+    let title = "见习者";
+    if (level >= 3) title = "修行者";
+    if (level >= 5) title = "觉醒者";
+    if (level >= 10) title = "破局者";
+    if (level >= 20) title = "主宰";
+
+    return { totalXP, level, currentLevelXP, nextLevelXP, progress, title };
+  }, [stats.totalDurationHrs]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const daysInMonth = new Date(
     currentDate.getFullYear(),
@@ -1218,18 +1237,24 @@ const App = () => {
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 font-sans pb-24 animate-fade-in">
       <StyleLoader />
-{/* 👇👇👇 新的 RPG 玩家状态栏 & 账号菜单 👇👇👇 */}
-<div className="sticky top-0 z-40 bg-[#020617]/90 backdrop-blur-xl border-b border-white/5 px-4 py-3 shadow-lg">
+      {/* 👇👇👇 新的 RPG 玩家状态栏 & 账号菜单 👇👇👇 */}
+      <div className="sticky top-0 z-40 bg-[#020617]/90 backdrop-blur-xl border-b border-white/5 px-4 py-3 shadow-lg">
         <div className="flex justify-between items-center">
           {/* 左侧：玩家状态 HUD */}
           <div className="flex items-center gap-3 flex-1">
             {/* 头像/等级徽章 */}
             <div className="relative">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20 border border-white/10">
-                <span className="font-bold text-white font-mono text-sm">Lv.{playerStats.level}</span>
+                <span className="font-bold text-white font-mono text-sm">
+                  Lv.{playerStats.level}
+                </span>
               </div>
               {/* 在线状态点 */}
-              <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-[#020617] ${isLocalMode ? 'bg-amber-500' : 'bg-emerald-500'}`}></div>
+              <div
+                className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-[#020617] ${
+                  isLocalMode ? "bg-amber-500" : "bg-emerald-500"
+                }`}
+              ></div>
             </div>
 
             {/* 经验条与头衔 */}
@@ -1237,7 +1262,11 @@ const App = () => {
               <div className="flex justify-between items-end mb-1">
                 <span className="text-xs font-bold text-white tracking-wider flex items-center gap-1">
                   {playerStats.title}
-                  {isLocalMode && <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1 rounded">OFFLINE</span>}
+                  {isLocalMode && (
+                    <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1 rounded">
+                      OFFLINE
+                    </span>
+                  )}
                 </span>
                 <span className="text-[9px] font-mono text-blue-300">
                   {playerStats.currentLevelXP}/{playerStats.nextLevelXP} XP
@@ -1245,7 +1274,7 @@ const App = () => {
               </div>
               {/* 经验槽 */}
               <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden border border-white/5">
-                <div 
+                <div
                   className="h-full bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"
                   style={{ width: `${playerStats.progress}%` }}
                 ></div>
@@ -1259,9 +1288,13 @@ const App = () => {
             className="p-2 rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-colors relative"
           >
             {user?.photoURL ? (
-               <img src={user.photoURL} className="w-8 h-8 rounded-full border border-white/10" alt="User" />
+              <img
+                src={user.photoURL}
+                className="w-8 h-8 rounded-full border border-white/10"
+                alt="User"
+              />
             ) : (
-               <LayoutDashboard size={24} />
+              <LayoutDashboard size={24} />
             )}
           </button>
         </div>
@@ -1269,18 +1302,33 @@ const App = () => {
         {/* 👇 账号切换下拉菜单 (解决切换难的问题) 👇 */}
         {showUserMenu && (
           <>
-            <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setShowUserMenu(false)}></div>
+            <div
+              className="fixed inset-0 z-40 bg-black/20"
+              onClick={() => setShowUserMenu(false)}
+            ></div>
             <div className="absolute top-full right-2 mt-2 w-64 bg-[#1e293b] border border-slate-700 rounded-2xl shadow-2xl p-4 z-50 animate-slide-up origin-top-right">
               <div className="flex items-center gap-3 mb-4 pb-4 border-b border-slate-700/50">
                 <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-xl">
-                  {user?.photoURL ? <img src={user.photoURL} className="w-10 h-10 rounded-full" alt="" /> : "👤"}
+                  {user?.photoURL ? (
+                    <img
+                      src={user.photoURL}
+                      className="w-10 h-10 rounded-full"
+                      alt=""
+                    />
+                  ) : (
+                    "👤"
+                  )}
                 </div>
                 <div className="overflow-hidden">
-                  <div className="text-sm font-bold text-white truncate">{user?.displayName || "匿名强者"}</div>
-                  <div className="text-xs text-slate-500 truncate">{user?.email || "Local User"}</div>
+                  <div className="text-sm font-bold text-white truncate">
+                    {user?.displayName || "匿名强者"}
+                  </div>
+                  <div className="text-xs text-slate-500 truncate">
+                    {user?.email || "Local User"}
+                  </div>
                 </div>
               </div>
-              
+
               <button
                 onClick={() => {
                   if (isLocalMode) {
