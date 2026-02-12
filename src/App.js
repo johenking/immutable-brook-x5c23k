@@ -314,14 +314,38 @@ const TrendChart = ({ data, dataKey, color, height = 50 }) => {
 // 👇👇👇 替换原来的 AuditItem 组件 (超大热区+丝滑GPU加速版) 👇👇👇
 const AuditItem = ({ type, val, setVal, note, setNote }) => {
   const criteria = RATING_CRITERIA[type];
-  
+
   const getLevelInfo = (v) => {
     const score = Number(v);
-    if (score <= 2) return { text: criteria.levels[1], color: "text-rose-500 bg-rose-500/10 border-rose-500/20 shadow-rose-900/20" };
-    if (score <= 4) return { text: criteria.levels[2], color: "text-orange-400 bg-orange-500/10 border-orange-500/20 shadow-orange-900/20" };
-    if (score <= 6) return { text: criteria.levels[3], color: "text-amber-300 bg-amber-500/10 border-amber-500/20 shadow-amber-900/20" };
-    if (score <= 8) return { text: criteria.levels[4], color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20 shadow-emerald-900/20" };
-    return { text: criteria.levels[5], color: "text-cyan-300 bg-cyan-500/10 border-cyan-500/50 shadow-[0_0_15px_rgba(34,211,238,0.2)] animate-pulse" };
+    if (score <= 2)
+      return {
+        text: criteria.levels[1],
+        color:
+          "text-rose-500 bg-rose-500/10 border-rose-500/20 shadow-rose-900/20",
+      };
+    if (score <= 4)
+      return {
+        text: criteria.levels[2],
+        color:
+          "text-orange-400 bg-orange-500/10 border-orange-500/20 shadow-orange-900/20",
+      };
+    if (score <= 6)
+      return {
+        text: criteria.levels[3],
+        color:
+          "text-amber-300 bg-amber-500/10 border-amber-500/20 shadow-amber-900/20",
+      };
+    if (score <= 8)
+      return {
+        text: criteria.levels[4],
+        color:
+          "text-emerald-400 bg-emerald-500/10 border-emerald-500/20 shadow-emerald-900/20",
+      };
+    return {
+      text: criteria.levels[5],
+      color:
+        "text-cyan-300 bg-cyan-500/10 border-cyan-500/50 shadow-[0_0_15px_rgba(34,211,238,0.2)] animate-pulse",
+    };
   };
 
   const levelInfo = getLevelInfo(val);
@@ -332,24 +356,45 @@ const AuditItem = ({ type, val, setVal, note, setNote }) => {
       {/* 标题栏 */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
-          <div className={`p-2.5 rounded-xl bg-slate-800 shadow-inner ${criteria.color === 'rose' ? 'text-rose-400' : criteria.color === 'amber' ? 'text-amber-400' : criteria.color === 'emerald' ? 'text-emerald-400' : criteria.color === 'blue' ? 'text-blue-400' : 'text-purple-400'}`}>
+          <div
+            className={`p-2.5 rounded-xl bg-slate-800 shadow-inner ${
+              criteria.color === "rose"
+                ? "text-rose-400"
+                : criteria.color === "amber"
+                ? "text-amber-400"
+                : criteria.color === "emerald"
+                ? "text-emerald-400"
+                : criteria.color === "blue"
+                ? "text-blue-400"
+                : "text-purple-400"
+            }`}
+          >
             {criteria.icon}
           </div>
           <div>
-            <div className="text-sm font-bold text-slate-200">{criteria.label}</div>
-            <div className="text-[10px] text-slate-500 leading-tight mt-0.5">{criteria.definition}</div>
+            <div className="text-sm font-bold text-slate-200">
+              {criteria.label}
+            </div>
+            <div className="text-[10px] text-slate-500 leading-tight mt-0.5">
+              {criteria.definition}
+            </div>
           </div>
         </div>
         <div className="flex items-baseline gap-1">
-          <span className={`font-mono text-3xl font-bold tracking-tighter ${levelInfo.color.split(" ")[0]}`}>{val}</span>
+          <span
+            className={`font-mono text-3xl font-bold tracking-tighter ${
+              levelInfo.color.split(" ")[0]
+            }`}
+          >
+            {val}
+          </span>
           <span className="text-xs text-slate-600 font-bold">/10</span>
         </div>
       </div>
 
       {/* === 滑块区域 (核心优化区) === */}
       {/* 1. 加高容器到 h-14 (56px)，确保足够大的触控垂直空间 */}
-      <div className="relative h-14 flex items-center mb-4 touch-none"> 
-        
+      <div className="relative h-14 flex items-center mb-4 touch-none">
         {/* 2. 原生输入控件：透明、全屏覆盖、层级最高 */}
         <input
           type="range"
@@ -360,42 +405,61 @@ const AuditItem = ({ type, val, setVal, note, setNote }) => {
           onChange={(e) => setVal(e.target.value)}
           // 🟢 z-30 确保在最上层；h-full w-full 铺满整个触控区；cursor-grab 提供鼠标反馈
           className="absolute inset-0 w-full h-full opacity-0 z-30 cursor-grab active:cursor-grabbing"
-          style={{ touchAction: 'none' }}
+          style={{ touchAction: "none" }}
         />
 
         {/* 3. 自定义滑块轨道 UI (视觉层，位于中间层 z-10) */}
         <div className="w-full h-3 bg-slate-800/80 rounded-full overflow-hidden relative border border-white/5 pointer-events-none z-10">
-           <div 
-             // 这里的 transition 只负责颜色变化，不负责位置，避免卡顿
-             className={`h-full transition-colors duration-200 ease-out ${Number(val) > 8 ? 'bg-gradient-to-r from-blue-500 to-cyan-400' : Number(val) > 6 ? 'bg-emerald-500' : Number(val) > 4 ? 'bg-amber-400' : Number(val) > 2 ? 'bg-orange-500' : 'bg-rose-500'}`} 
-             style={{ width: `${val * 10}%` }}
-           ></div>
+          <div
+            // 这里的 transition 只负责颜色变化，不负责位置，避免卡顿
+            className={`h-full transition-colors duration-200 ease-out ${
+              Number(val) > 8
+                ? "bg-gradient-to-r from-blue-500 to-cyan-400"
+                : Number(val) > 6
+                ? "bg-emerald-500"
+                : Number(val) > 4
+                ? "bg-amber-400"
+                : Number(val) > 2
+                ? "bg-orange-500"
+                : "bg-rose-500"
+            }`}
+            style={{ width: `${val * 10}%` }}
+          ></div>
         </div>
-        
+
         {/* 4. 自定义滑块头 (视觉层，跟随移动，位于 z-20) */}
-        <div 
+        <div
           // 🟢 will-change-transform 开启 GPU 加速
           // 🟢 group-active:scale-110 拖动时放大给予反馈
           // 🟢 使用 translate(-50%, -50%) 进行更精准的中心定位
           className="absolute top-1/2 h-7 w-7 bg-white rounded-full shadow-[0_2px_10px_rgba(0,0,0,0.5)] border-4 border-[#0f172a] pointer-events-none transition-transform duration-150 ease-out flex items-center justify-center z-20 will-change-transform group-active:scale-110"
-          style={{ 
+          style={{
             left: `${val * 10}%`,
-            transform: `translate(-50%, -50%)` 
+            transform: `translate(-50%, -50%)`,
           }}
         >
-          <div className={`w-2 h-2 rounded-full ${Number(val) > 8 ? 'bg-cyan-500' : 'bg-slate-400'}`}></div>
+          <div
+            className={`w-2 h-2 rounded-full ${
+              Number(val) > 8 ? "bg-cyan-500" : "bg-slate-400"
+            }`}
+          ></div>
         </div>
       </div>
 
       {/* 状态反馈胶囊 */}
-      <div className={`text-xs px-3 py-3 rounded-xl border mb-4 flex items-start gap-2 transition-all duration-300 ${levelInfo.color}`}>
+      <div
+        className={`text-xs px-3 py-3 rounded-xl border mb-4 flex items-start gap-2 transition-all duration-300 ${levelInfo.color}`}
+      >
         <Info size={14} className="shrink-0 mt-0.5 opacity-80" />
         <p className="font-bold tracking-wide">{levelInfo.text}</p>
       </div>
 
       {/* 备注输入框 */}
       <div className="relative group/input">
-        <Edit3 size={14} className="absolute left-4 top-4 text-slate-600 group-focus-within/input:text-blue-400 transition-colors" />
+        <Edit3
+          size={14}
+          className="absolute left-4 top-4 text-slate-600 group-focus-within/input:text-blue-400 transition-colors"
+        />
         <input
           type="text"
           value={note}
@@ -795,6 +859,29 @@ const App = () => {
 
   // --- Stats ---
   const stats = useMemo(() => {
+    // 👇👇👇 插入 RPG 等级计算逻辑 👇👇👇
+    const [showUserMenu, setShowUserMenu] = useState(false); // 控制账号菜单显示
+
+    const playerStats = useMemo(() => {
+      // 经验值算法：过去所有完成任务的分钟数 = XP
+      // 比如：投入 100 小时 = 6000 XP
+      const totalXP = Math.floor(stats.totalDurationHrs * 60);
+
+      // 升级算法：每一级需要 1000 XP (大约 16.6 小时投入)
+      const level = Math.floor(totalXP / 1000) + 1;
+      const currentLevelXP = totalXP % 1000;
+      const nextLevelXP = 1000;
+      const progress = (currentLevelXP / nextLevelXP) * 100;
+
+      // 头衔系统
+      let title = "见习者";
+      if (level >= 3) title = "修行者";
+      if (level >= 5) title = "觉醒者";
+      if (level >= 10) title = "破局者";
+      if (level >= 20) title = "主宰";
+
+      return { totalXP, level, currentLevelXP, nextLevelXP, progress, title };
+    }, [stats.totalDurationHrs]);
     const completed = tasks.filter((t) => t.status === "Completed");
     const totalDurationHrs =
       tasks.reduce((acc, t) => acc + (t.duration || 0), 0) / 3600;
@@ -1131,72 +1218,87 @@ const App = () => {
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 font-sans pb-24 animate-fade-in">
       <StyleLoader />
-      <div className="sticky top-0 z-30 bg-[#020617]/80 backdrop-blur-xl border-b border-white/5 px-6 py-4 flex justify-between items-center shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-rose-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-900/20">
-            <Zap size={18} className="text-white" />
-          </div>
-          <h1 className="font-bold text-lg tracking-tight">
-            强者系统{" "}
-            <span
-              className={`text-[10px] font-mono ml-2 border px-1 py-0.5 rounded ${
-                isLocalMode
-                  ? "text-amber-500 border-amber-500/20 bg-amber-500/10"
-                  : "text-emerald-500 border-emerald-500/20 bg-emerald-500/10"
-              }`}
-            >
-              {isLocalMode ? "OFFLINE" : "ONLINE"}
-            </span>
-          </h1>
-        </div>
-        {/* --- [新增] PC 端顶部导航 (手机隐藏) --- */}
-        <div className="hidden md:flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/5 absolute left-1/2 -translate-x-1/2">
-          <button
-            onClick={() => setActiveTab("execution")}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === "execution"
-                ? "bg-slate-700 text-white shadow-lg"
-                : "text-slate-400 hover:text-white hover:bg-white/5"
-            }`}
-          >
-            <LayoutDashboard size={14} /> 作战
-          </button>
-          <button
-            onClick={() => setActiveTab("audit")}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === "audit"
-                ? "bg-slate-700 text-white shadow-lg"
-                : "text-slate-400 hover:text-white hover:bg-white/5"
-            }`}
-          >
-            <Heart size={14} /> 审计
-          </button>
-          <button
-            onClick={() => setActiveTab("assets")}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === "assets"
-                ? "bg-slate-700 text-white shadow-lg"
-                : "text-slate-400 hover:text-white hover:bg-white/5"
-            }`}
-          >
-            <ShieldCheck size={14} /> 资产
-          </button>
-        </div>
-        <button
-          onClick={() => {
-            if (isLocalMode) {
-              setUser(null);
-              setIsLocalMode(false);
-            } else {
-              signOut(auth);
-            }
-          }}
-          className="text-slate-500 hover:text-white p-2 transition-colors"
-        >
-          <LogOut size={20} />
-        </button>
-      </div>
+{/* 👇👇👇 新的 RPG 玩家状态栏 & 账号菜单 👇👇👇 */}
+<div className="sticky top-0 z-40 bg-[#020617]/90 backdrop-blur-xl border-b border-white/5 px-4 py-3 shadow-lg">
+        <div className="flex justify-between items-center">
+          {/* 左侧：玩家状态 HUD */}
+          <div className="flex items-center gap-3 flex-1">
+            {/* 头像/等级徽章 */}
+            <div className="relative">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20 border border-white/10">
+                <span className="font-bold text-white font-mono text-sm">Lv.{playerStats.level}</span>
+              </div>
+              {/* 在线状态点 */}
+              <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-[#020617] ${isLocalMode ? 'bg-amber-500' : 'bg-emerald-500'}`}></div>
+            </div>
 
+            {/* 经验条与头衔 */}
+            <div className="flex-1 max-w-[160px]">
+              <div className="flex justify-between items-end mb-1">
+                <span className="text-xs font-bold text-white tracking-wider flex items-center gap-1">
+                  {playerStats.title}
+                  {isLocalMode && <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1 rounded">OFFLINE</span>}
+                </span>
+                <span className="text-[9px] font-mono text-blue-300">
+                  {playerStats.currentLevelXP}/{playerStats.nextLevelXP} XP
+                </span>
+              </div>
+              {/* 经验槽 */}
+              <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden border border-white/5">
+                <div 
+                  className="h-full bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+                  style={{ width: `${playerStats.progress}%` }}
+                ></div>
+              </div>
+            </div>
+          </div>
+
+          {/* 右侧：用户菜单触发器 */}
+          <button
+            onClick={() => setShowUserMenu(!showUserMenu)}
+            className="p-2 rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-colors relative"
+          >
+            {user?.photoURL ? (
+               <img src={user.photoURL} className="w-8 h-8 rounded-full border border-white/10" alt="User" />
+            ) : (
+               <LayoutDashboard size={24} />
+            )}
+          </button>
+        </div>
+
+        {/* 👇 账号切换下拉菜单 (解决切换难的问题) 👇 */}
+        {showUserMenu && (
+          <>
+            <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setShowUserMenu(false)}></div>
+            <div className="absolute top-full right-2 mt-2 w-64 bg-[#1e293b] border border-slate-700 rounded-2xl shadow-2xl p-4 z-50 animate-slide-up origin-top-right">
+              <div className="flex items-center gap-3 mb-4 pb-4 border-b border-slate-700/50">
+                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-xl">
+                  {user?.photoURL ? <img src={user.photoURL} className="w-10 h-10 rounded-full" alt="" /> : "👤"}
+                </div>
+                <div className="overflow-hidden">
+                  <div className="text-sm font-bold text-white truncate">{user?.displayName || "匿名强者"}</div>
+                  <div className="text-xs text-slate-500 truncate">{user?.email || "Local User"}</div>
+                </div>
+              </div>
+              
+              <button
+                onClick={() => {
+                  if (isLocalMode) {
+                    setUser(null);
+                    setIsLocalMode(false);
+                  } else {
+                    signOut(auth);
+                  }
+                  setShowUserMenu(false);
+                }}
+                className="w-full py-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all"
+              >
+                <LogOut size={16} /> 退出登录 / 切换账号
+              </button>
+            </div>
+          </>
+        )}
+      </div>
       <div className="max-w-4xl mx-auto p-4 space-y-8 mt-4">
         {/* BLOCK 1: Life Audit */}
         {activeTab === "audit" && (
