@@ -949,74 +949,107 @@ const App = () => {
     document.body.removeChild(a);
   };
 
-  // const handleTaskAction = ... (这是你原来的代码)
+ // 👇👇👇 最终修复版 handleTaskAction (暂停、完成均强制存档，拒绝清零) 👇👇👇
+ const handleTaskAction = async (action, taskId, payload = null) => {
+  if (!user) return;
+  
+  // 1. 获取当前内存中的最新任务状态 (包含刚刚跑出来的 duration)
+  const task = tasks.find((t) => t.id === taskId);
+  if (!task) return; 
 
-  const handleTaskAction = async (action, taskId, payload = null) => {
-    if (!user) return;
-    const task = tasks.find((t) => t.id === taskId);
-    const updates = {};
+  const updates = {};
 
-    if (action === "toggle") {
-      if (activeTaskId === taskId) {
-        setActiveTaskId(null);
-        updates.status = "Pending";
-      } else {
-        setActiveTaskId(taskId);
-        updates.status = "In Progress";
-      }
-    }
-    if (action === "complete") {
-      if (activeTaskId === taskId) setActiveTaskId(null);
-      updates.status = "Completed";
-      updates.endTime = new Date().toISOString();
-
-      // 🟢【插入这段代码】影子价格自动结算逻辑
-      // 意思就是：如果你没填实际收入(actualRevenue)，但你设了预估值(estValue)，
-      // 系统就默认你赚到了这个预估值（比如健身1小时=200元）。
-      if (!task.actualRevenue && task.estValue > 0) {
-        updates.actualRevenue = task.estValue;
-      }
-    }
-    if (action === "delete") {
-      if (window.confirm("确认删除？")) {
-        if (isLocalMode)
-          setTasks((prev) => prev.filter((t) => t.id !== taskId));
-        else
-          await deleteDoc(
-            doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId)
-          );
-      }
-      return;
-    }
-    if (action === "revert") {
+  // --- 动作 1: 开始/暂停 (Toggle) ---
+  if (action === "toggle") {
+    if (activeTaskId === taskId) {
+      // 🛑 情况 A: 正在进行 -> 暂停
+      setActiveTaskId(null);
       updates.status = "Pending";
-      updates.endTime = null;
+      
+      // 🚨🚨🚨 核心修复：暂停时也要存档！🚨🚨🚨
+      // 把内存里的时间写入数据库，防止被云端旧数据覆盖
+      updates.duration = task.duration || 0; 
+      
+    } else {
+      // ▶️ 情况 B: 暂停/未开始 -> 开始
+      setActiveTaskId(taskId);
+      updates.status = "In Progress";
     }
-    if (action === "revenue") {
-      updates.actualRevenue = Number(revenueInput);
-    }
-    if (action === "adjust") {
-      const newDuration =
-        (task.duration || 0) + Number(payload.addMinutes) * 60;
-      const newRevenue = (task.actualRevenue || 0) + Number(payload.addRevenue);
-      updates.duration = newDuration;
-      updates.actualRevenue = newRevenue;
-      if (payload.shouldStart) {
-        updates.status = "In Progress";
-        setActiveTaskId(taskId);
-      }
-      setShowAdjustModal(false);
-    }
+  }
 
-    if (Object.keys(updates).length > 0) {
-      if (isLocalMode) updateLocalTask(taskId, updates);
+  // --- 动作 2: 完成任务 (Complete) ---
+  if (action === "complete") {
+    if (activeTaskId === taskId) setActiveTaskId(null); // 停止计时
+    updates.status = "Completed";
+    updates.endTime = new Date().toISOString();
+    
+    // 🚨🚨🚨 核心修复：完成时强制存档 🚨🚨🚨
+    updates.duration = task.duration || 0; 
+
+    // 自动结算金币
+    if (!task.actualRevenue) {
+       if (task.mode === 'bounty') {
+          updates.actualRevenue = task.fixedReward || 0;
+       } else if (task.hourlyRate > 0 && (task.duration || 0) > 0) {
+          updates.actualRevenue = ((task.duration / 3600) * task.hourlyRate);
+       }
+    }
+  }
+
+  // --- 动作 3: 删除任务 ---
+  if (action === "delete") {
+    if (window.confirm("确认删除？")) {
+      if (isLocalMode)
+        setTasks((prev) => prev.filter((t) => t.id !== taskId));
       else
-        await updateDoc(
-          doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId),
-          updates
+        await deleteDoc(
+          doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId)
         );
     }
-  };
+    return;
+  }
+
+  // --- 动作 4: 撤销完成 ---
+  if (action === "revert") {
+    updates.status = "Pending";
+    updates.endTime = null;
+  }
+
+  // --- 动作 5: 手动修改金额 ---
+  if (action === "revenue") {
+    updates.actualRevenue = Number(revenueInput);
+  }
+
+  // --- 动作 6: 补录/调整时间 ---
+  if (action === "adjust") {
+    const currentDuration = task.duration || 0;
+    const currentRevenue = task.actualRevenue || 0;
+    
+    const newDuration = currentDuration + Number(payload.addMinutes) * 60;
+    const newRevenue = currentRevenue + Number(payload.addRevenue);
+    
+    updates.duration = newDuration;
+    updates.actualRevenue = newRevenue;
+    
+    if (payload.shouldStart) {
+      updates.status = "In Progress";
+      setActiveTaskId(taskId);
+    }
+    setShowAdjustModal(false);
+  }
+
+  // --- 统一提交更新 ---
+  if (Object.keys(updates).length > 0) {
+    if (isLocalMode) {
+      updateLocalTask(taskId, updates);
+    } else {
+      await updateDoc(
+        doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId),
+        updates
+      );
+    }
+  }
+};
 
   // 👇👇👇 这里的代码完全替换原来的 addTask 函数 👇👇👇
   // 👇👇👇 替换原来的 addTask 函数 (RPG 逻辑升级版) 👇👇👇
