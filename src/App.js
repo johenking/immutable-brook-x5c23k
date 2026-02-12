@@ -140,9 +140,9 @@ const appId = "life-system-production-v1";
 const HOURLY_THRESHOLD = 200;
 
 const SHADOW_PRICES = {
-  investment: 300,
-  health: 200,
-  maintenance: 50,
+  investment: 100, // 🟣 潜能 (学习/健身/代码)
+  work: 50, // 🔵 搬砖 (兼职/社团/杂务)
+  maintenance: 20, // 🟢 维持 (通勤/家务/跑腿)
 };
 
 // ==========================================
@@ -406,13 +406,22 @@ const CalendarView = ({ type, data, onSelectDate }) => {
         return tDate === dateStr && t.status === "Completed";
       });
       if (tasksForDay.length === 0) return null;
+
       const totalSeconds = tasksForDay.reduce(
         (acc, t) => acc + (t.duration || 0),
         0
       );
+
+      // 👇👇👇 [新增] 计算当天总营收 👇👇👇
+      const totalRevenue = tasksForDay.reduce(
+        (acc, t) => acc + (Number(t.actualRevenue) || 0),
+        0
+      );
+
       return {
         count: tasksForDay.length,
         duration: totalSeconds,
+        totalRevenue, // 👈 记得把这个新算出来的钱返回出去
         tasks: tasksForDay,
       };
     }
@@ -501,11 +510,23 @@ const CalendarView = ({ type, data, onSelectDate }) => {
                 item
               )} ${isToday ? "ring-2 ring-white z-10" : ""}`}
             >
-              <span className="text-xs">{day}</span>
+              <span className="text-xs font-bold text-slate-500">{day}</span>
+
+              {/* 👇👇👇 新增：显示金额逻辑 👇👇👇 */}
               {type === "task" && item && (
-                <span className="text-[9px] mt-1 font-mono">
-                  {(item.duration / 3600).toFixed(1)}h
-                </span>
+                <div className="flex flex-col items-center mt-0.5">
+                  {/* 如果有钱，显示绿色金额 */}
+                  {item.totalRevenue > 0 ? (
+                    <span className="text-[9px] font-mono font-bold text-emerald-400">
+                      ¥{item.totalRevenue}
+                    </span>
+                  ) : (
+                    // 如果没钱只有时间，显示个小横杠或者时长
+                    <span className="text-[9px] font-mono text-slate-600">
+                      {(item.duration / 3600).toFixed(1)}h
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           );
@@ -1035,6 +1056,39 @@ const App = () => {
               {isLocalMode ? "OFFLINE" : "ONLINE"}
             </span>
           </h1>
+        </div>
+        {/* --- [新增] PC 端顶部导航 (手机隐藏) --- */}
+        <div className="hidden md:flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/5 absolute left-1/2 -translate-x-1/2">
+          <button
+            onClick={() => setActiveTab("execution")}
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === "execution"
+                ? "bg-slate-700 text-white shadow-lg"
+                : "text-slate-400 hover:text-white hover:bg-white/5"
+            }`}
+          >
+            <LayoutDashboard size={14} /> 作战
+          </button>
+          <button
+            onClick={() => setActiveTab("audit")}
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === "audit"
+                ? "bg-slate-700 text-white shadow-lg"
+                : "text-slate-400 hover:text-white hover:bg-white/5"
+            }`}
+          >
+            <Heart size={14} /> 审计
+          </button>
+          <button
+            onClick={() => setActiveTab("assets")}
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === "assets"
+                ? "bg-slate-700 text-white shadow-lg"
+                : "text-slate-400 hover:text-white hover:bg-white/5"
+            }`}
+          >
+            <ShieldCheck size={14} /> 资产
+          </button>
         </div>
         <button
           onClick={() => {
@@ -1704,41 +1758,9 @@ const App = () => {
                     <Calculator size={10} /> 怎么算?
                   </button>
                 </div>
-
                 {showValueHelper && (
                   <div className="flex gap-2 mb-2 animate-fade-in">
-                    <button
-                      onClick={() =>
-                        setNewTask({
-                          ...newTask,
-                          estValue: SHADOW_PRICES.investment,
-                        })
-                      }
-                      className="flex-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] py-2 rounded-lg hover:bg-emerald-500/20"
-                    >
-                      <div className="font-bold flex items-center justify-center gap-1">
-                        <BrainCircuit size={10} /> 技能投资
-                      </div>
-                      <div className="opacity-70">
-                        ¥{SHADOW_PRICES.investment}/h
-                      </div>
-                    </button>
-                    <button
-                      onClick={() =>
-                        setNewTask({
-                          ...newTask,
-                          estValue: SHADOW_PRICES.health,
-                        })
-                      }
-                      className="flex-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] py-2 rounded-lg hover:bg-amber-500/20"
-                    >
-                      <div className="font-bold flex items-center justify-center gap-1">
-                        <Dumbbell size={10} /> 身体投资
-                      </div>
-                      <div className="opacity-70">
-                        ¥{SHADOW_PRICES.health}/h
-                      </div>
-                    </button>
+                    {/* 按钮 1：维持 (¥20) */}
                     <button
                       onClick={() =>
                         setNewTask({
@@ -1746,18 +1768,53 @@ const App = () => {
                           estValue: SHADOW_PRICES.maintenance,
                         })
                       }
-                      className="flex-1 bg-slate-700/30 border border-slate-600/50 text-slate-300 text-[10px] py-2 rounded-lg hover:bg-slate-700/50"
+                      className="flex-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] py-2 rounded-lg hover:bg-emerald-500/20 active:scale-95 transition-all"
                     >
                       <div className="font-bold flex items-center justify-center gap-1">
-                        <Home size={10} /> 生活维护
+                        <Home size={10} /> 维持
                       </div>
-                      <div className="opacity-70">
+                      <div className="opacity-70 font-mono">
                         ¥{SHADOW_PRICES.maintenance}/h
+                      </div>
+                    </button>
+
+                    {/* 按钮 2：搬砖 (¥50) */}
+                    <button
+                      onClick={() =>
+                        setNewTask({
+                          ...newTask,
+                          estValue: SHADOW_PRICES.work,
+                        })
+                      }
+                      className="flex-1 bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[10px] py-2 rounded-lg hover:bg-blue-500/20 active:scale-95 transition-all"
+                    >
+                      <div className="font-bold flex items-center justify-center gap-1">
+                        <Briefcase size={10} /> 搬砖
+                      </div>
+                      <div className="opacity-70 font-mono">
+                        ¥{SHADOW_PRICES.work}/h
+                      </div>
+                    </button>
+
+                    {/* 按钮 3：潜能 (¥100) */}
+                    <button
+                      onClick={() =>
+                        setNewTask({
+                          ...newTask,
+                          estValue: SHADOW_PRICES.investment,
+                        })
+                      }
+                      className="flex-1 bg-purple-500/10 border border-purple-500/30 text-purple-400 text-[10px] py-2 rounded-lg hover:bg-purple-500/20 active:scale-95 transition-all"
+                    >
+                      <div className="font-bold flex items-center justify-center gap-1">
+                        <Zap size={10} /> 潜能
+                      </div>
+                      <div className="opacity-70 font-mono">
+                        ¥{SHADOW_PRICES.investment}/h
                       </div>
                     </button>
                   </div>
                 )}
-
                 {isManualEntry ? (
                   <div className="grid grid-cols-2 gap-3 animate-fade-in">
                     <div>
@@ -1885,6 +1942,21 @@ const App = () => {
                 </div>
               </div>
             </div>
+            {/* 👇👇👇 [新增] 一键补录按钮 👇👇👇 */}
+            <button
+              onClick={() => {
+                setShowDailyReportModal(false);
+                setIsManualEntry(true);
+                setShowAddModal(true);
+                // 简单提示用户确认日期
+                alert(
+                  `正在补录 ${reportDate} 的任务，请在弹窗中确认日期是否正确。`
+                );
+              }}
+              className="w-full py-3 mb-4 bg-white/5 border border-dashed border-slate-700 hover:bg-blue-600/10 hover:border-blue-500/50 hover:text-blue-400 text-slate-500 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+            >
+              <Plus size={14} /> 补录 {reportDate} 的任务
+            </button>
 
             <div className="space-y-3">
               <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">
