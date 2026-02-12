@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react"; // 👈 必须补上 useState
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
 import {
@@ -70,6 +70,7 @@ import {
   WifiOff,
   Download,
   ShieldCheck,
+  Briefcase, // 👈 确保这里有 Briefcase
 } from "lucide-react";
 
 // ==========================================
@@ -879,7 +880,7 @@ const App = () => {
     }
   };
 
-  c; // 👇👇👇 这里的代码完全替换原来的 addTask 函数 👇👇👇
+  // 👇👇👇 这里的代码完全替换原来的 addTask 函数 👇👇👇
   const addTask = async (shouldStartImmediately = false) => {
     if (!user) return;
     const finalProject = isNewProject
