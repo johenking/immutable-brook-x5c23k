@@ -690,26 +690,9 @@ const App = () => {
   const [auditViewMode, setAuditViewMode] = useState("trends");
   const [taskViewMode, setTaskViewMode] = useState("list");
   const [targetDate, setTargetDate] = useState(null); // [新增] 用于记录补录的目标日期
-  
-  // 👇👇👇 1. 智能折叠状态 (改为记录“谁展开了”，默认全关) 👇👇👇
-  const [expandedGroups, setExpandedGroups] = useState({});
-
-  // 👇👇👇 2. 自动展开逻辑：当有任务开始时，自动展开它所在的分组 👇👇👇
-  useEffect(() => {
-    if (activeTaskId) {
-      const activeTask = tasks.find(t => t.id === activeTaskId);
-      if (activeTask) {
-        const groupName = activeTask.project || "默认项目";
-        setExpandedGroups(prev => ({
-          ...prev,
-          [groupName]: true // 强制展开当前正在进行的分组
-        }));
-      }
-    }
-  }, [activeTaskId, tasks]);
-
+  const [collapsedGroups, setCollapsedGroups] = useState({});
   const toggleGroup = (groupName) => {
-    setExpandedGroups((prev) => ({
+    setCollapsedGroups((prev) => ({
       ...prev,
       [groupName]: !prev[groupName],
     }));
@@ -965,118 +948,75 @@ const App = () => {
     a.click();
     document.body.removeChild(a);
   };
-// 👇👇👇 第一步修复：替换后的 handleTaskAction 👇👇👇
-const handleTaskAction = async (action, taskId, payload = null) => {
-  if (!user) return;
 
-  // 1. 获取当前内存中的最新任务状态
-  const task = tasks.find((t) => t.id === taskId);
-  if (!task) return;
+  // const handleTaskAction = ... (这是你原来的代码)
 
-  const updates = {};
+  const handleTaskAction = async (action, taskId, payload = null) => {
+    if (!user) return;
+    const task = tasks.find((t) => t.id === taskId);
+    const updates = {};
 
-  // --- 动作 1: 开始/暂停 (Toggle) ---
-  if (action === "toggle") {
-    if (activeTaskId === taskId) {
-      // 🛑 正在进行 -> 暂停
-      setActiveTaskId(null);
+    if (action === "toggle") {
+      if (activeTaskId === taskId) {
+        setActiveTaskId(null);
+        updates.status = "Pending";
+      } else {
+        setActiveTaskId(taskId);
+        updates.status = "In Progress";
+      }
+    }
+    if (action === "complete") {
+      if (activeTaskId === taskId) setActiveTaskId(null);
+      updates.status = "Completed";
+      updates.endTime = new Date().toISOString();
+
+      // 🟢【插入这段代码】影子价格自动结算逻辑
+      // 意思就是：如果你没填实际收入(actualRevenue)，但你设了预估值(estValue)，
+      // 系统就默认你赚到了这个预估值（比如健身1小时=200元）。
+      if (!task.actualRevenue && task.estValue > 0) {
+        updates.actualRevenue = task.estValue;
+      }
+    }
+    if (action === "delete") {
+      if (window.confirm("确认删除？")) {
+        if (isLocalMode)
+          setTasks((prev) => prev.filter((t) => t.id !== taskId));
+        else
+          await deleteDoc(
+            doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId)
+          );
+      }
+      return;
+    }
+    if (action === "revert") {
       updates.status = "Pending";
-      // 核心修复：暂停时存档当前跑出来的时间
-      updates.duration = task.duration || 0;
-    } else {
-      // ▶️ 暂停/未开始 -> 开始
-      setActiveTaskId(taskId);
-      updates.status = "In Progress";
-      
-      // 🟢【修复点A】: 如果是从“已完成”状态直接点播放“复活”，必须清空已结算金额
-      // 否则系统会认为这笔钱已经算死了，不会随时间增加
-      if (task.status === "Completed") {
-          updates.actualRevenue = null; 
-          updates.endTime = null;
-      }
+      updates.endTime = null;
     }
-  }
-
-  // --- 动作 2: 完成任务 (Complete) ---
-  if (action === "complete") {
-    if (activeTaskId === taskId) setActiveTaskId(null); // 停止计时
-    updates.status = "Completed";
-    updates.endTime = new Date().toISOString();
-    updates.duration = task.duration || 0; // 强制存档时间
-
-    // 自动结算金币 (只在没有手动修改过金额的情况下执行)
-    if (!task.actualRevenue) {
-      if (task.mode === "bounty") {
-        updates.actualRevenue = task.fixedReward || 0;
-      } else if (task.hourlyRate > 0 && (task.duration || 0) > 0) {
-        // 正常的时薪结算写入
-        updates.actualRevenue = (task.duration / 3600) * task.hourlyRate;
-      }
+    if (action === "revenue") {
+      updates.actualRevenue = Number(revenueInput);
     }
-  }
+    if (action === "adjust") {
+      const newDuration =
+        (task.duration || 0) + Number(payload.addMinutes) * 60;
+      const newRevenue = (task.actualRevenue || 0) + Number(payload.addRevenue);
+      updates.duration = newDuration;
+      updates.actualRevenue = newRevenue;
+      if (payload.shouldStart) {
+        updates.status = "In Progress";
+        setActiveTaskId(taskId);
+      }
+      setShowAdjustModal(false);
+    }
 
-  // --- 动作 3: 删除任务 ---
-  if (action === "delete") {
-    if (window.confirm("确认删除？")) {
-      if (isLocalMode)
-        setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    if (Object.keys(updates).length > 0) {
+      if (isLocalMode) updateLocalTask(taskId, updates);
       else
-        await deleteDoc(
-          doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId)
+        await updateDoc(
+          doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId),
+          updates
         );
     }
-    return;
-  }
-
-  // --- 动作 4: 撤销完成 (Revert) ---
-  if (action === "revert") {
-    updates.status = "Pending"; // 变回待办
-    updates.endTime = null;     // 清除完成时间
-    
-    // 🟢【修复点B】: 核心！必须把“写死”的金额抹掉，变回 null
-    // 这样前端渲染时，就会重新走 ((duration / 3600) * hourlyRate) 的实时公式
-    updates.actualRevenue = null; 
-  }
-
-  // --- 动作 5: 手动修改金额 ---
-  if (action === "revenue") {
-    updates.actualRevenue = Number(revenueInput);
-  }
-
-  // --- 动作 6: 补录/调整时间 ---
-  if (action === "adjust") {
-    const currentDuration = task.duration || 0;
-    const currentRevenue = task.actualRevenue || 0;
-
-    const newDuration = currentDuration + Number(payload.addMinutes) * 60;
-    
-    // 更新时间
-    updates.duration = newDuration;
-    
-    // 如果之前已经有收益，就在基础上加；如果没有，就保持 null 让它动态算
-    if (task.actualRevenue || payload.addRevenue > 0) {
-        updates.actualRevenue = currentRevenue + Number(payload.addRevenue);
-    }
-
-    if (payload.shouldStart) {
-      updates.status = "In Progress";
-      setActiveTaskId(taskId);
-    }
-    setShowAdjustModal(false);
-  }
-
-  // --- 统一提交更新 ---
-  if (Object.keys(updates).length > 0) {
-    if (isLocalMode) {
-      updateLocalTask(taskId, updates);
-    } else {
-      await updateDoc(
-        doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId),
-        updates
-      );
-    }
-  }
-};
+  };
 
   // 👇👇👇 这里的代码完全替换原来的 addTask 函数 👇👇👇
   // 👇👇👇 替换原来的 addTask 函数 (RPG 逻辑升级版) 👇👇👇
@@ -1672,7 +1612,7 @@ const handleTaskAction = async (action, taskId, payload = null) => {
                 {/* 任务分组渲染 */}
                 {/* 👇👇👇 第二步：任务列表渲染 (实时金币 + 经验值 + 悬赏模式) 👇👇👇 */}
               {groupedTasks.map((group) => {
-                const isCollapsed = expandedGroups[group.name];
+                const isCollapsed = collapsedGroups[group.name];
 
                 return (
                   <div key={group.name} className="space-y-3">
