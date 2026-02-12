@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
 import {
@@ -586,7 +586,7 @@ const App = () => {
 
   const [auditViewMode, setAuditViewMode] = useState("trends");
   const [taskViewMode, setTaskViewMode] = useState("list");
-
+  const [targetDate, setTargetDate] = useState(null); // [新增] 用于记录补录的目标日期
   const [reviewDate, setReviewDate] = useState(
     new Date().toISOString().split("T")[0]
   );
@@ -879,29 +879,40 @@ const App = () => {
     }
   };
 
+  c; // 👇👇👇 这里的代码完全替换原来的 addTask 函数 👇👇👇
   const addTask = async (shouldStartImmediately = false) => {
     if (!user) return;
     const finalProject = isNewProject
       ? newTask.customProject || "未命名项目"
       : newTask.project || "默认项目";
     if (!newTask.title && !isManualEntry) return;
+
     const id = Date.now().toString();
-    const now = new Date().toISOString();
+
+    // 🟢 [核心修改点]：如果是补录模式且有目标日期，则使用目标日期，否则使用当前时间
+    let finalDate = new Date().toISOString();
+    if (isManualEntry && targetDate) {
+      // 这里的逻辑是：如果你选了2月10号，我就把任务时间设为 2月10号的中午12点
+      // 这样做是为了防止时区问题导致日期跑偏
+      finalDate = new Date(targetDate + "T12:00:00").toISOString();
+    }
+
     let taskData = {
       id,
       title: newTask.title || "快速记录",
       project: finalProject,
       estValue: Number(newTask.estValue),
-      createdAt: now,
+      createdAt: finalDate, // 使用我们计算好的日期
       duration: Number(newTask.manualDurationMinutes) * 60,
       actualRevenue: Number(newTask.manualRevenue),
     };
+
     if (shouldStartImmediately) {
       taskData.status = "In Progress";
       setActiveTaskId(id);
     } else if (isManualEntry) {
       taskData.status = "Completed";
-      taskData.endTime = now;
+      taskData.endTime = finalDate; // 结束时间也设为补录日期
     } else {
       taskData.status = "Pending";
     }
@@ -914,6 +925,8 @@ const App = () => {
         taskData
       );
     }
+
+    // 重置表单状态
     setNewTask({
       title: "",
       project: finalProject,
@@ -925,6 +938,28 @@ const App = () => {
     setShowAddModal(false);
     setIsManualEntry(false);
     setIsNewProject(false);
+    setTargetDate(null); // 🟢 [重要] 任务加完后，把目标日期清空，防止影响后续操作
+  };
+  // 👇👇👇 这是新加的函数，专门处理日历点击 👇👇👇
+  const handleCalendarDateSelect = (dateStr, dayData) => {
+    const todayStr = new Date().toISOString().split("T")[0];
+
+    // 1. 禁止穿越未来
+    if (dateStr > todayStr) {
+      alert("无法预支未来！");
+      return;
+    }
+
+    setTargetDate(dateStr); // 🟢 关键：把系统锁定在你点击的那一天
+
+    if (!dayData || dayData.count === 0) {
+      // 2. 如果当天没数据 -> 系统认为你想补录 -> 自动切到手动模式 -> 弹窗
+      setIsManualEntry(true);
+      setShowAddModal(true);
+    } else {
+      // 3. 如果当天有数据 -> 打开日报
+      openDailyReport(dateStr, dayData);
+    }
   };
 
   const openReviewForDate = (dateStr) => {
@@ -1284,6 +1319,7 @@ const App = () => {
                 {/* 新项目按钮 - 手机端只显示图标，PC端显示文字 */}
                 <button
                   onClick={() => {
+                    setTargetDate(null); // 🟢 [新增] 强制清空补录日期，确保是“新建今天”
                     setIsManualEntry(false);
                     setShowAddModal(true);
                   }}
@@ -1337,174 +1373,217 @@ const App = () => {
             </div>
 
             {taskViewMode === "list" ? (
-              <div className="space-y-6 relative z-10 animate-fade-in">
+              <div className="space-y-8 relative z-10 animate-fade-in">
+                {/* 空状态提示 */}
                 {groupedTasks.length === 0 && (
                   <div className="text-center py-12 text-slate-600 text-xs border border-dashed border-slate-800 rounded-2xl">
                     暂无战斗部署，请新建项目。
                   </div>
                 )}
+
+                {/* 任务分组渲染 */}
                 {groupedTasks.map((group) => (
                   <div key={group.name} className="space-y-3">
-                    <div className="flex items-center gap-2 px-1">
-                      <FolderOpen size={16} className="text-slate-500" />
-                      <h3 className="text-sm font-bold text-slate-300 uppercase tracking-widest">
+                    {/* --- 分组标题栏优化 --- */}
+                    <div className="flex items-center gap-2 px-1 mb-2">
+                      <div className="p-1.5 bg-slate-800/80 rounded-lg border border-white/5">
+                        <FolderOpen size={14} className="text-blue-400" />
+                      </div>
+                      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">
                         {group.name}
                       </h3>
                       <div className="h-px bg-slate-800 flex-1 ml-2"></div>
-                      <span className="text-[10px] text-slate-600 font-mono">
+                      <span className="text-[10px] text-slate-600 font-mono bg-slate-900/50 px-2 py-1 rounded-lg border border-white/5">
                         {formatTime(group.totalTime)} · ¥{group.totalRev}
                       </span>
                     </div>
-                    {group.tasks.map((task) => (
-                      <div
-                        key={task.id}
-                        className={`bg-black/40 border ${
-                          activeTaskId === task.id
-                            ? "border-blue-500/50 bg-blue-500/5"
-                            : "border-white/5"
-                        } p-3 rounded-xl flex items-center justify-between group transition-all`}
-                      >
-                        <div className="flex items-center gap-4 overflow-hidden">
-                          <div
-                            className={`w-1 h-10 rounded-full ${
-                              task.status === "Completed"
-                                ? "bg-emerald-500"
-                                : activeTaskId === task.id
-                                ? "bg-amber-500 animate-pulse"
-                                : "bg-blue-500"
-                            }`}
-                          ></div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4
-                                className={`font-bold text-sm truncate ${
-                                  task.status === "Completed"
-                                    ? "line-through text-slate-500"
-                                    : "text-white"
-                                }`}
-                              >
-                                {task.title}
-                              </h4>
-                              {activeTaskId === task.id && (
-                                <span className="text-[10px] text-amber-500 font-bold animate-pulse flex items-center gap-1">
-                                  <Clock size={10} /> 计时中
-                                </span>
-                              )}
+
+                    {/* --- 任务卡片列表 (核心UI升级) --- */}
+                    <div className="space-y-3">
+                      {group.tasks.map((task) => (
+                        <div
+                          key={task.id}
+                          className={`relative group overflow-hidden rounded-2xl border transition-all duration-300 ${
+                            activeTaskId === task.id
+                              ? "bg-blue-900/10 border-blue-500/50 shadow-[0_0_20px_rgba(59,130,246,0.15)]"
+                              : "bg-[#1e293b]/40 border-white/5 hover:border-white/10 hover:bg-[#1e293b]/60"
+                          }`}
+                        >
+                          {/* 激活状态左侧发光条 */}
+                          {activeTaskId === task.id && (
+                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 animate-pulse shadow-[0_0_10px_#3b82f6]"></div>
+                          )}
+
+                          <div className="p-4 flex flex-row items-center justify-between gap-3">
+                            {/* === 左侧：核心信息区 === */}
+                            <div className="flex-1 min-w-0">
+                              {/* 标题行 */}
+                              <div className="flex items-center gap-2 mb-2.5">
+                                <h4
+                                  className={`font-bold text-base truncate ${
+                                    task.status === "Completed"
+                                      ? "text-slate-500 line-through decoration-slate-700"
+                                      : "text-slate-100"
+                                  }`}
+                                >
+                                  {task.title}
+                                </h4>
+                                {/* 呼吸灯动画点 */}
+                                {activeTaskId === task.id && (
+                                  <span className="flex h-2 w-2 relative">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* 数据胶囊行 (时长 & 金额) */}
+                              <div className="flex flex-wrap gap-2">
+                                {/* 时长胶囊 (可点击修改) */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setAdjustTaskData({
+                                      id: task.id,
+                                      addMinutes: 0,
+                                      addRevenue: 0,
+                                    });
+                                    setShowAdjustModal(true);
+                                  }}
+                                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/20 border border-white/5 text-xs font-mono text-slate-400 hover:text-blue-400 hover:border-blue-500/30 transition-colors"
+                                >
+                                  <Clock size={12} />
+                                  {formatTime(task.duration)}
+                                  <Plus
+                                    size={8}
+                                    className="opacity-50 ml-0.5"
+                                  />
+                                </button>
+
+                                {/* 金额胶囊 */}
+                                {(task.estValue > 0 ||
+                                  task.actualRevenue > 0) && (
+                                  <div
+                                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-mono ${
+                                      task.actualRevenue > 0
+                                        ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                                        : "bg-black/20 border-white/5 text-slate-600"
+                                    }`}
+                                  >
+                                    <span className="font-sans opacity-50">
+                                      ¥
+                                    </span>
+                                    {task.actualRevenue || task.estValue}
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex gap-3 text-[10px] text-slate-500 font-mono mt-1">
-                              <button
-                                onClick={() => {
-                                  setAdjustTaskData({
-                                    id: task.id,
-                                    addMinutes: 0,
-                                    addRevenue: 0,
-                                  });
-                                  setShowAdjustModal(true);
-                                }}
-                                className="flex items-center gap-1 hover:text-blue-400 transition-colors cursor-pointer bg-white/5 px-1.5 rounded"
-                              >
-                                <Clock size={10} /> {formatTime(task.duration)}{" "}
-                                <Plus size={8} />
-                              </button>
-                              <span className="flex items-center gap-1">
-                                <ArrowRight size={10} /> ¥{task.estValue}
-                              </span>
-                              {task.actualRevenue > 0 && (
-                                <span className="text-emerald-500 font-bold">
-                                  ¥{task.actualRevenue}
-                                </span>
+
+                            {/* === 右侧：大按钮操作区 === */}
+                            <div className="flex items-center gap-2 pl-2">
+                              {task.status !== "Completed" ? (
+                                <>
+                                  {/* 播放/暂停按钮 (加大尺寸) */}
+                                  <button
+                                    onClick={() =>
+                                      handleTaskAction("toggle", task.id)
+                                    }
+                                    className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all ${
+                                      activeTaskId === task.id
+                                        ? "bg-amber-500 text-slate-900 shadow-lg shadow-amber-500/20 active:scale-95"
+                                        : "bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white border border-white/5"
+                                    }`}
+                                  >
+                                    {activeTaskId === task.id ? (
+                                      <Square size={18} fill="currentColor" />
+                                    ) : (
+                                      <Play
+                                        size={20}
+                                        fill="currentColor"
+                                        className="ml-0.5"
+                                      />
+                                    )}
+                                  </button>
+
+                                  {/* 完成按钮 */}
+                                  <button
+                                    onClick={() =>
+                                      handleTaskAction("complete", task.id)
+                                    }
+                                    className="w-11 h-11 rounded-xl bg-white/5 border border-white/5 text-emerald-500 flex items-center justify-center hover:bg-emerald-500/10 hover:border-emerald-500/50 transition-all active:scale-95"
+                                  >
+                                    <CheckCircle2 size={22} />
+                                  </button>
+                                </>
+                              ) : (
+                                <div className="flex items-center gap-1">
+                                  {/* 收入核算输入框 (美化版) */}
+                                  {editRevenueId === task.id ? (
+                                    <div className="flex items-center gap-1 animate-fade-in mr-1">
+                                      <input
+                                        type="number"
+                                        value={revenueInput}
+                                        onChange={(e) =>
+                                          setRevenueInput(e.target.value)
+                                        }
+                                        className="w-16 bg-black/50 border border-blue-500 rounded-lg text-xs px-2 py-2 text-white outline-none font-mono"
+                                        autoFocus
+                                        placeholder="0"
+                                      />
+                                      <button
+                                        onClick={() => {
+                                          handleTaskAction("revenue", task.id);
+                                          setEditRevenueId(null);
+                                        }}
+                                        className="bg-blue-600 text-white text-xs px-3 py-2 rounded-lg font-bold"
+                                      >
+                                        OK
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => {
+                                        setEditRevenueId(task.id);
+                                        setRevenueInput(task.actualRevenue);
+                                      }}
+                                      className={`mr-1 px-3 py-1.5 rounded-lg border text-xs font-mono transition-all ${
+                                        task.actualRevenue
+                                          ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/10"
+                                          : "border-dashed border-slate-700 text-slate-500 hover:border-slate-500"
+                                      }`}
+                                    >
+                                      {task.actualRevenue
+                                        ? `¥${task.actualRevenue}`
+                                        : "核算?"}
+                                    </button>
+                                  )}
+
+                                  {/* 撤销按钮 */}
+                                  <button
+                                    onClick={() =>
+                                      handleTaskAction("revert", task.id)
+                                    }
+                                    className="w-10 h-10 rounded-lg bg-slate-800/50 text-slate-500 flex items-center justify-center hover:text-blue-400 transition-all"
+                                  >
+                                    <Undo2 size={18} />
+                                  </button>
+                                </div>
                               )}
+
+                              {/* 删除按钮 (仅显示图标，防误触) */}
+                              <button
+                                onClick={() =>
+                                  handleTaskAction("delete", task.id)
+                                }
+                                className="w-10 h-10 flex items-center justify-center text-slate-700 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-all"
+                              >
+                                <Trash2 size={18} />
+                              </button>
                             </div>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          {task.status !== "Completed" ? (
-                            <>
-                              <button
-                                onClick={() =>
-                                  handleTaskAction("toggle", task.id)
-                                }
-                                className={`p-2.5 rounded-lg transition-all ${
-                                  activeTaskId === task.id
-                                    ? "bg-amber-500 text-slate-900 shadow-lg shadow-amber-500/20"
-                                    : "bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white"
-                                }`}
-                              >
-                                {activeTaskId === task.id ? (
-                                  <Square size={14} fill="currentColor" />
-                                ) : (
-                                  <Play size={14} fill="currentColor" />
-                                )}
-                              </button>
-                              <button
-                                onClick={() =>
-                                  handleTaskAction("complete", task.id)
-                                }
-                                className="p-2.5 bg-white/5 text-emerald-500 rounded-lg hover:bg-emerald-500/20 transition-all"
-                              >
-                                <CheckCircle2 size={14} />
-                              </button>
-                            </>
-                          ) : (
-                            <div className="flex items-center gap-2">
-                              {editRevenueId === task.id ? (
-                                <div className="flex items-center gap-1 animate-fade-in">
-                                  <input
-                                    type="number"
-                                    value={revenueInput}
-                                    onChange={(e) =>
-                                      setRevenueInput(e.target.value)
-                                    }
-                                    className="w-16 bg-black border border-blue-500 rounded text-xs px-2 py-1 text-white outline-none"
-                                    autoFocus
-                                    placeholder="0"
-                                  />
-                                  <button
-                                    onClick={() => {
-                                      handleTaskAction("revenue", task.id);
-                                      setEditRevenueId(null);
-                                    }}
-                                    className="bg-blue-600 text-white text-[10px] px-2 py-1 rounded font-bold"
-                                  >
-                                    OK
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => {
-                                    setEditRevenueId(task.id);
-                                    setRevenueInput(task.actualRevenue);
-                                  }}
-                                  className={`text-[10px] px-2 py-1 rounded border font-mono ${
-                                    task.actualRevenue
-                                      ? "border-emerald-500/20 text-emerald-400 bg-emerald-500/5"
-                                      : "border-dashed border-slate-700 text-slate-500 hover:border-slate-500"
-                                  }`}
-                                >
-                                  {task.actualRevenue
-                                    ? `¥${task.actualRevenue}`
-                                    : "核算?"}
-                                </button>
-                              )}
-                              <button
-                                onClick={() =>
-                                  handleTaskAction("revert", task.id)
-                                }
-                                className="text-slate-600 hover:text-blue-500 p-1"
-                              >
-                                <Undo2 size={14} />
-                              </button>
-                            </div>
-                          )}
-                          <button
-                            onClick={() => handleTaskAction("delete", task.id)}
-                            className="text-slate-700 hover:text-rose-500 p-2 opacity-0 group-hover:opacity-100 transition-all"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1513,7 +1592,7 @@ const App = () => {
                 <CalendarView
                   type="task"
                   data={tasks}
-                  onSelectDate={openDailyReport}
+                  onSelectDate={handleCalendarDateSelect}
                 />
               </div>
             )}
@@ -1669,6 +1748,12 @@ const App = () => {
             className="bg-[#0f172a] border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-slide-up"
             onClick={(e) => e.stopPropagation()}
           >
+            {targetDate && (
+              <div className="mb-4 bg-amber-500/10 border border-amber-500/20 text-amber-400 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 animate-fade-in">
+                <CalendarIcon size={12} />
+                正在补录: {targetDate}
+              </div>
+            )}
             <div className="flex bg-black/40 p-1 rounded-xl mb-6 border border-white/5">
               <button
                 onClick={() => setIsManualEntry(false)}
@@ -1952,13 +2037,10 @@ const App = () => {
             {/* 👇👇👇 [新增] 一键补录按钮 👇👇👇 */}
             <button
               onClick={() => {
-                setShowDailyReportModal(false);
-                setIsManualEntry(true);
-                setShowAddModal(true);
-                // 简单提示用户确认日期
-                alert(
-                  `正在补录 ${reportDate} 的任务，请在弹窗中确认日期是否正确。`
-                );
+                setShowDailyReportModal(false); // 关闭战报
+                setTargetDate(reportDate); // 🟢 关键：锁定战报显示的日期
+                setIsManualEntry(true); // 开启手动模式
+                setShowAddModal(true); // 打开输入弹窗
               }}
               className="w-full py-3 mb-4 bg-white/5 border border-dashed border-slate-700 hover:bg-blue-600/10 hover:border-blue-500/50 hover:text-blue-400 text-slate-500 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
             >
