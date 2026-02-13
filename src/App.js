@@ -668,7 +668,7 @@ const CalendarView = ({ type, data, onSelectDate }) => {
     </div>
   );
 };
-// --- 左滑删除卡片组件 (终极美学版 V7：双层网格布局、完美对齐) ---
+// --- 左滑删除卡片组件 (终极全端适配版 V9：支持手机触摸 + 电脑鼠标拖拽) ---
 const SwipeableTaskCard = ({
   task,
   isActive,
@@ -679,45 +679,48 @@ const SwipeableTaskCard = ({
   setEditRevenueId,
   setRevenueInput,
   handleRevenueEdit,
+  onTimeClick,
 }) => {
   const [offsetX, setOffsetX] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
   
+  // 核心引用
   const startX = useRef(0);
   const startY = useRef(0);
   const startOffset = useRef(0);
-  const isVerticalScroll = useRef(false); 
+  const isVerticalScroll = useRef(false);
+  const isDragging = useRef(false); // 🔴 新增：标记鼠标是否按下
 
-  // 1. 触摸开始
-  const handleTouchStart = (e) => {
+  // ==============================
+  // 统一的滑动处理逻辑 (Core Logic)
+  // ==============================
+  
+  const handleStart = (clientX, clientY) => {
     setIsAnimating(false);
-    startX.current = e.touches[0].clientX;
-    startY.current = e.touches[0].clientY;
+    startX.current = clientX;
+    startY.current = clientY;
     startOffset.current = offsetX;
     isVerticalScroll.current = false;
+    isDragging.current = true; // 锁定拖拽状态
   };
 
-  // 2. 触摸移动
-  const handleTouchMove = (e) => {
-    if (isVerticalScroll.current) return;
+  const handleMove = (clientX, clientY) => {
+    // 如果没有按下鼠标/手指，或者判定为垂直滚动，则不处理
+    if (!isDragging.current || isVerticalScroll.current) return;
 
-    const currentTouchX = e.touches[0].clientX;
-    const currentTouchY = e.touches[0].clientY;
-    
-    const diffX = currentTouchX - startX.current;
-    const diffY = currentTouchY - startY.current;
+    const diffX = clientX - startX.current;
+    const diffY = clientY - startY.current;
 
+    // 方向锁判定 (仅第一次移动时判定)
     if (Math.abs(diffY) > Math.abs(diffX) && Math.abs(diffY) > 5) {
         isVerticalScroll.current = true;
         return;
     }
 
-    if (e.cancelable && Math.abs(diffX) > 5) {
-        // e.preventDefault(); 
-    }
-
+    // 计算新位置
     let newOffset = startOffset.current + diffX;
 
+    // 阻尼效果
     if (newOffset < -80) {
         newOffset = -80 + (newOffset + 80) * 0.2; 
     } else if (newOffset > 0) {
@@ -727,9 +730,12 @@ const SwipeableTaskCard = ({
     setOffsetX(newOffset);
   };
 
-  // 3. 触摸结束
-  const handleTouchEnd = () => {
+  const handleEnd = () => {
+    if (!isDragging.current) return;
+    isDragging.current = false;
     setIsAnimating(true);
+    
+    // 吸附逻辑
     if (offsetX < -40) {
         setOffsetX(-80);
     } else {
@@ -742,7 +748,33 @@ const SwipeableTaskCard = ({
     setOffsetX(0);
   };
 
-  // 数据计算
+  // ==============================
+  // 事件监听器 (Event Listeners)
+  // ==============================
+
+  // Touch Events (手机端)
+  const onTouchStart = (e) => handleStart(e.touches[0].clientX, e.touches[0].clientY);
+  const onTouchMove = (e) => handleMove(e.touches[0].clientX, e.touches[0].clientY);
+  const onTouchEnd = () => handleEnd();
+
+  // Mouse Events (电脑端) 🔴 新增
+  const onMouseDown = (e) => {
+      // 只有左键点击才触发拖拽
+      if (e.button !== 0) return;
+      handleStart(e.clientX, e.clientY);
+  };
+  const onMouseMove = (e) => {
+      // 阻止默认文本选择行为，让拖拽更丝滑
+      if (isDragging.current) e.preventDefault(); 
+      handleMove(e.clientX, e.clientY);
+  };
+  const onMouseUp = () => handleEnd();
+  const onMouseLeave = () => handleEnd(); // 鼠标移出卡片范围也算结束
+
+  // ==============================
+  // 渲染逻辑 (Render)
+  // ==============================
+
   const isBounty = task.mode === "bounty";
   const xpType = task.xpType || "work";
   const currentXP = Math.floor(((task.duration || 0) / 60) * (task.expMult || 1));
@@ -757,50 +789,40 @@ const SwipeableTaskCard = ({
   }
 
   const showDebtWarning = isCompleted && isTimeDebt;
-
-  // 🔴 日期处理：确保有值，如果数据库里没有 createdAt，就用当前时间兜底
   const dateObj = task.createdAt ? new Date(task.createdAt) : new Date();
   const dateStr = dateObj.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }).replace('/', '-');
 
   return (
-    // 🔴 视觉优化：高度改为 h-36 (144px)，给三行布局留足空间
     <div 
       className="relative h-36 w-full mb-3 select-none isolate"
       style={{ touchAction: 'pan-y' }}
     >
-      {/* 背景层 (删除按钮) */}
-      <div 
-        className={`absolute inset-0 bg-rose-600 flex items-center justify-end pr-8 rounded-2xl z-0 transition-opacity duration-200 ${
-           offsetX < -2 ? 'opacity-100' : 'opacity-0'
-        }`}
-      >
-        <button
-          onClick={(e) => {
-             e.stopPropagation();
-             handleTaskAction("delete", task.id);
-          }}
-          className="flex flex-col items-center text-white font-bold gap-1 scale-110"
-        >
-          <Trash2 size={20} />
-          <span className="text-[10px]">删除</span>
+      {/* 背景层 */}
+      <div className={`absolute inset-0 bg-rose-600 flex items-center justify-end pr-8 rounded-2xl z-0 transition-opacity duration-200 ${offsetX < -2 ? 'opacity-100' : 'opacity-0'}`}>
+        <button onClick={(e) => { e.stopPropagation(); handleTaskAction("delete", task.id); }} className="flex flex-col items-center text-white font-bold gap-1 scale-110">
+          <Trash2 size={20} /><span className="text-[10px]">删除</span>
         </button>
       </div>
 
-      {/* 前景层 (卡片内容) */}
+      {/* 前景层 */}
       <div
         className={`absolute inset-0 z-10 rounded-2xl flex flex-col border overflow-hidden px-5 py-4
           ${isAnimating ? "transition-transform duration-500 cubic-bezier(0.18, 0.89, 0.32, 1.28)" : ""} 
-          ${isActive 
-            ? "bg-[#1e293b] border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]" 
-            : showDebtWarning
-            ? "bg-[#1e293b] border-rose-500/50"
-            : "bg-[#1e293b] border-white/5"
-          }
+          ${isActive ? "bg-[#1e293b] border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]" : showDebtWarning ? "bg-[#1e293b] border-rose-500/50" : "bg-[#1e293b] border-white/5"}
+          ${isDragging.current ? "cursor-grabbing" : "cursor-grab"} 
         `}
+        // 样式：增加 cursor-grab 提示电脑用户这里可以拖动
         style={{ transform: `translateX(${offsetX}px)` }}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
+        
+        // 绑定所有事件
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onMouseLeave}
+
         onClick={(e) => {
             if (Math.abs(offsetX) > 5) {
                 e.preventDefault();
@@ -809,8 +831,7 @@ const SwipeableTaskCard = ({
             }
         }}
       >
-        {/* === 第一行：元数据层 (标签 + 日期) === */}
-        {/* 🔴 修复：两端对齐，日期显示在右上角 */}
+        {/* 顶部 */}
         <div className="flex justify-between items-center mb-1">
             <div className="flex items-center gap-2">
               {xpType === "growth" && <span className="text-[9px] font-bold bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded border border-purple-500/30">进化</span>}
@@ -818,77 +839,41 @@ const SwipeableTaskCard = ({
               {isBounty && <span className="text-[9px] font-bold bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">悬赏</span>}
               {!xpType && !isBounty && <span className="text-[9px] font-bold bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/30">搬砖</span>}
             </div>
-            
-            {/* 日期显示 */}
-            <span className="text-[10px] font-mono text-slate-500/60 font-bold tracking-wider">
-               {dateStr}
-            </span>
+            <span className="text-[10px] font-mono text-slate-500/60 font-bold tracking-wider">{dateStr}</span>
         </div>
 
-        {/* === 第二行：核心层 (标题 + 计时器) === */}
-        {/* 🔴 修复：居中对齐 (items-center)，保证标题和时间在同一水平线 */}
         <div className="flex justify-between items-center mb-auto pt-1">
-            <h4 className={`font-bold text-base truncate pr-3 ${isCompleted ? "text-slate-500 line-through" : "text-slate-100"}`}>
-              {task.title}
-            </h4>
-
-            <div className={`shrink-0 px-2 py-1 rounded-lg border flex items-center justify-center ${isActive ? 'bg-blue-500/10 border-blue-500/30' : 'bg-black/40 border-white/10'}`}>
+            <h4 className={`font-bold text-base truncate pr-3 ${isCompleted ? "text-slate-500 line-through" : "text-slate-100"}`}>{task.title}</h4>
+            <div 
+               onClick={(e) => { e.stopPropagation(); onTimeClick(task); }} 
+               className={`shrink-0 px-2 py-1 rounded-lg border flex items-center justify-center cursor-pointer hover:bg-white/5 active:scale-95 transition-all ${isActive ? 'bg-blue-500/10 border-blue-500/30' : 'bg-black/40 border-white/10'}`}
+            >
                <span className={`font-mono text-sm font-bold leading-none ${isActive ? 'text-blue-400' : 'text-slate-500'}`}>
                   {formatTime(task.duration)}
                </span>
             </div>
         </div>
 
-        {/* === 第三行：底部控制层 (数据 + 按钮) === */}
-        {/* 🔴 修复：底部留白已经在父容器 padding 统一控制，这里只需 justify-between */}
+        {/* 底部 */}
         <div className="flex items-center justify-between pt-2 mt-2 border-t border-white/5">
-          
           <div className="flex items-center gap-2 min-w-0 overflow-hidden">
             <div className="shrink-0 px-2 py-1.5 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-mono flex items-center gap-1 font-bold">
               <Zap size={12} fill="currentColor" /> {currentXP}
             </div>
-            <div className={`px-2 py-1.5 rounded-md border text-xs font-mono font-bold flex items-center gap-1 truncate max-w-[110px] ${
-                showDebtWarning ? "text-rose-400 border-rose-500/30 bg-rose-500/5" : 
-                "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
-            }`}>
+            <div className={`px-2 py-1.5 rounded-md border text-xs font-mono font-bold flex items-center gap-1 truncate max-w-[110px] ${showDebtWarning ? "text-rose-400 border-rose-500/30 bg-rose-500/5" : "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"}`}>
                ¥ {Number(displayMoney).toFixed(2)}
             </div>
           </div>
-
           <div className="flex items-center gap-3 shrink-0">
              {isCompleted ? (
                 <>
-                   <button 
-                      onClick={(e) => { e.stopPropagation(); handleRevenueEdit(task); }}
-                      className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center border border-emerald-500/30 hover:bg-emerald-500/20 transition-all active:scale-90"
-                   >
-                      <RefreshCcw size={15} />
-                   </button>
-                   <button 
-                      onClick={(e) => { e.stopPropagation(); handleTaskAction("revert", task.id); }}
-                      className="w-9 h-9 rounded-xl bg-slate-700/50 text-slate-400 flex items-center justify-center hover:text-white transition-all active:scale-90"
-                   >
-                      <Undo2 size={16} />
-                   </button>
+                   <button onClick={(e) => { e.stopPropagation(); handleRevenueEdit(task); }} className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center border border-emerald-500/30 hover:bg-emerald-500/20 transition-all active:scale-90"><RefreshCcw size={15} /></button>
+                   <button onClick={(e) => { e.stopPropagation(); handleTaskAction("revert", task.id); }} className="w-9 h-9 rounded-xl bg-slate-700/50 text-slate-400 flex items-center justify-center hover:text-white transition-all active:scale-90"><Undo2 size={16} /></button>
                 </>
              ) : (
                 <>
-                   <button 
-                      onClick={(e) => { e.stopPropagation(); handleTaskAction("toggle", task.id); }}
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all shadow-lg active:scale-90 ${
-                         isActive 
-                         ? "bg-amber-500 text-slate-900 shadow-amber-500/30" 
-                         : "bg-slate-700 text-white hover:bg-slate-600"
-                      }`}
-                   >
-                      {isActive ? <Square size={14} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
-                   </button>
-                   <button 
-                      onClick={(e) => { e.stopPropagation(); handleTaskAction("complete", task.id); }}
-                      className="w-9 h-9 rounded-xl border-2 border-emerald-500 text-emerald-500 flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all active:scale-90"
-                   >
-                      <CheckSquare size={16} />
-                   </button>
+                   <button onClick={(e) => { e.stopPropagation(); handleTaskAction("toggle", task.id); }} className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all shadow-lg active:scale-90 ${isActive ? "bg-amber-500 text-slate-900 shadow-amber-500/30" : "bg-slate-700 text-white hover:bg-slate-600"}`}>{isActive ? <Square size={14} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}</button>
+                   <button onClick={(e) => { e.stopPropagation(); handleTaskAction("complete", task.id); }} className="w-9 h-9 rounded-xl border-2 border-emerald-500 text-emerald-500 flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all active:scale-90"><CheckSquare size={16} /></button>
                 </>
              )}
           </div>
@@ -1256,19 +1241,18 @@ const App = () => {
     }
     return;
   }
-  // --- 动作 4: 撤销完成 (终极修复：强制状态同步) ---
+  // --- 动作 4: 撤销完成 (终极修复：清空结算数据 + 激活计时) ---
   if (action === "revert") {
-    // 🚨 关键点 1：必须强制设为 "In Progress"，否则计时器会忽略它！
-    // 之前的代码可能这里写的是 "Pending"，导致了问题。
+    // 1. 状态回滚
     updates.status = "In Progress"; 
-    
-    // 关键点 2：清除完成时间标记
     updates.endTime = null;
-    
-    // 关键点 3：保护现有时长不丢失
     updates.duration = task.duration || 0; 
     
-    // 关键点 4：重新激活全局计时器指针
+    // 🔴 核心修复：清空“已结算金额”。
+    // 只有把这个字段清空，卡片才会重新使用 (时长 * 时薪) 的公式来实时跳动金额。
+    updates.actualRevenue = null; 
+    
+    // 2. 重新激活全局计时器
     setActiveTaskId(taskId); 
   }
   // --- 动作 5: 手动修改金额 ---
@@ -1276,17 +1260,25 @@ const App = () => {
     updates.actualRevenue = Number(revenueInput);
   }
 
-  // --- 动作 6: 补录/调整时间 ---
+  /// --- 动作 6: 补录/调整时间 (智能联动：时间变了，钱也要变) ---
   if (action === "adjust") {
     const currentDuration = task.duration || 0;
-    const currentRevenue = task.actualRevenue || 0;
     
+    // 1. 计算新的总时长
     const newDuration = currentDuration + Number(payload.addMinutes) * 60;
-    const newRevenue = currentRevenue + Number(payload.addRevenue);
-    
     updates.duration = newDuration;
-    updates.actualRevenue = newRevenue;
+
+    // 2. 自动重算金额 (核心修复：补录时间后自动更新金额)
+    // 只有“计时付 (stream)”模式才自动算，悬赏模式 (bounty) 需要手动填追加金额
+    if (task.mode === 'stream') {
+        // 自动计算：新时长(小时) * 时薪
+        updates.actualRevenue = (newDuration / 3600) * task.hourlyRate;
+    } else {
+        // 悬赏模式：保持原有逻辑 (原有金额 + 追加金额)
+        updates.actualRevenue = (task.actualRevenue || 0) + Number(payload.addRevenue);
+    }
     
+    // 3. 状态处理
     if (payload.shouldStart) {
       updates.status = "In Progress";
       setActiveTaskId(taskId);
@@ -1315,6 +1307,11 @@ const App = () => {
     if(newVal !== null) {
         handleTaskAction("revenue", task.id, newVal);
     }
+};
+  const handleTimeClick = (task) => {
+  // 打开补录弹窗，并重置输入框
+  setAdjustTaskData({ id: task.id, addMinutes: 0, addRevenue: 0 });
+  setShowAdjustModal(true);
 };
   // 👇👇👇 替换原来的 addTask 函数 (RPG 逻辑升级版) 👇👇👇
   const addTask = async (shouldStartImmediately = false) => {
@@ -1963,6 +1960,7 @@ const App = () => {
                                      setEditRevenueId={setEditRevenueId}
                                      setRevenueInput={setRevenueInput}
                                      handleRevenueEdit={handleRevenueEdit}
+                                     onTimeClick={handleTimeClick} // 👈 记得加上这一行！
                                   />
                                 );
                               })}
