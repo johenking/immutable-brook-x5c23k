@@ -668,7 +668,8 @@ const CalendarView = ({ type, data, onSelectDate }) => {
     </div>
   );
 };
-// --- 左滑删除卡片组件 (终极版 V5：方向锁、智能防抖、自动计时恢复) ---
+// --- 左滑删除卡片组件 (终极手感优化版 V3：物理跟手、全向阻尼、视觉呼吸感) ---
+// --- 左滑删除卡片组件 (终极版 V6：垂直居中对齐、新增日期显示) ---
 const SwipeableTaskCard = ({
   task,
   isActive,
@@ -683,25 +684,22 @@ const SwipeableTaskCard = ({
   const [offsetX, setOffsetX] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
   
-  // Ref 引用：记录触摸起始点
   const startX = useRef(0);
-  const startY = useRef(0); // 🔴 新增：记录垂直起始点
+  const startY = useRef(0);
   const startOffset = useRef(0);
-  // 🔴 新增：方向锁。一旦锁定为“垂直滚动”，这次触摸就永远不移动卡片
   const isVerticalScroll = useRef(false); 
 
   // 1. 触摸开始
   const handleTouchStart = (e) => {
     setIsAnimating(false);
     startX.current = e.touches[0].clientX;
-    startY.current = e.touches[0].clientY; // 记录 Y 轴
+    startY.current = e.touches[0].clientY;
     startOffset.current = offsetX;
-    isVerticalScroll.current = false; // 重置方向锁
+    isVerticalScroll.current = false;
   };
 
   // 2. 触摸移动
   const handleTouchMove = (e) => {
-    // 如果已经判定为垂直滚动，直接忽略，让浏览器处理页面滚动
     if (isVerticalScroll.current) return;
 
     const currentTouchX = e.touches[0].clientX;
@@ -710,20 +708,15 @@ const SwipeableTaskCard = ({
     const diffX = currentTouchX - startX.current;
     const diffY = currentTouchY - startY.current;
 
-    // 🔴 核心算法：首次移动时进行判定
-    // 如果垂直移动距离 > 水平移动距离，说明用户想滚屏
-    // 我们就锁死这个状态，本次触摸不再处理任何卡片滑动
     if (Math.abs(diffY) > Math.abs(diffX) && Math.abs(diffY) > 5) {
         isVerticalScroll.current = true;
         return;
     }
 
-    // 只有水平意图明显时，才阻止浏览器默认行为（防止页面抖动）并移动卡片
     if (e.cancelable && Math.abs(diffX) > 5) {
-        // e.preventDefault(); // 注：React 18 被动事件可能无法阻止，依靠 touch-action: pan-y 辅助
+        // e.preventDefault(); 
     }
 
-    // 正常的滑动逻辑
     let newOffset = startOffset.current + diffX;
 
     if (newOffset < -80) {
@@ -766,10 +759,12 @@ const SwipeableTaskCard = ({
 
   const showDebtWarning = isCompleted && isTimeDebt;
 
+  // 🔴 新增：日期格式化 (MM-DD)
+  const dateStr = new Date(task.createdAt).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }).replace('/', '-');
+
   return (
     <div 
       className="relative h-32 w-full mb-3 select-none isolate"
-      // 🔴 touchAction: 'pan-y' 配合 JS 方向锁，是移动端最佳实践
       style={{ touchAction: 'pan-y' }}
     >
       {/* 背景层 */}
@@ -816,9 +811,14 @@ const SwipeableTaskCard = ({
         {/* 顶部 */}
         <div className="flex justify-between items-start p-5 pb-0">
           <div className="flex flex-col gap-1.5 overflow-hidden pr-2">
+            {/* 🔴 修改：标签栏加入日期 */}
             <div className="flex items-center gap-2">
               {xpType === "growth" && <span className="text-[9px] font-bold bg-purple-500/20 text-purple-300 px-1.5 rounded border border-purple-500/30">进化</span>}
               {isBounty && <span className="text-[9px] font-bold bg-amber-500/20 text-amber-300 px-1.5 rounded border border-amber-500/30">悬赏</span>}
+              {/* 日期显示 */}
+              <span className="text-[9px] font-mono text-slate-500 opacity-60">
+                {dateStr}
+              </span>
             </div>
             <h4 className={`font-bold text-base truncate ${isCompleted ? "text-slate-500 line-through" : "text-slate-100"}`}>
               {task.title}
@@ -833,7 +833,8 @@ const SwipeableTaskCard = ({
         </div>
 
         {/* 底部 */}
-        <div className="mt-auto px-5 pb-6 pt-2 flex items-end justify-between gap-2">
+        {/* 🔴 核心修复：items-end 改为 items-center，解决“各自站一边不对齐”的问题 */}
+        <div className="mt-auto px-5 pb-6 pt-2 flex items-center justify-between gap-2">
           
           <div className="flex items-center gap-2 min-w-0 overflow-hidden">
             <div className="shrink-0 px-2 py-1.5 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-mono flex items-center gap-1 font-bold">
