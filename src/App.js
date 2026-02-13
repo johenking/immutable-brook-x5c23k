@@ -1256,16 +1256,19 @@ const App = () => {
     }
     return;
   }
-  // --- 动作 4: 撤销完成 (智能恢复：撤回即继续计时) ---
+  // --- 动作 4: 撤销完成 (终极修复：强制状态同步) ---
   if (action === "revert") {
-    // 1. 强制状态回滚为 "In Progress" (进行中)，而不是 "Pending"
+    // 🚨 关键点 1：必须强制设为 "In Progress"，否则计时器会忽略它！
+    // 之前的代码可能这里写的是 "Pending"，导致了问题。
     updates.status = "In Progress"; 
-    // 2. 清除结束时间标记
+    
+    // 关键点 2：清除完成时间标记
     updates.endTime = null;
-    // 3. 保护当前已有的时长数据不丢失
+    
+    // 关键点 3：保护现有时长不丢失
     updates.duration = task.duration || 0; 
     
-    // 🔴 核心修复：立即激活全局计时器引擎，让数字跑起来！
+    // 关键点 4：重新激活全局计时器指针
     setActiveTaskId(taskId); 
   }
   // --- 动作 5: 手动修改金额 ---
