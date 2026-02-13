@@ -668,7 +668,8 @@ const CalendarView = ({ type, data, onSelectDate }) => {
     </div>
   );
 };
-// --- 左滑删除卡片组件 (终极手感优化版 V3：物理跟手、全向阻尼、视觉呼吸感) ---
+
+// --- 左滑删除卡片组件 (终极完美版 V4：双向手势、统一尺寸、拒绝抖动) ---
 const SwipeableTaskCard = ({
   task,
   isActive,
@@ -681,54 +682,47 @@ const SwipeableTaskCard = ({
   handleRevenueEdit,
 }) => {
   const [offsetX, setOffsetX] = useState(0);
-  const [isAnimating, setIsAnimating] = useState(false); // 控制松手时的回弹动画
+  const [isAnimating, setIsAnimating] = useState(false);
   const startX = useRef(0);
-  const currentX = useRef(0);
+  const startOffset = useRef(0); // 🔴 新增：记录按下时的初始偏移量
 
-  // 1. 触摸开始：瞬间移除动画，保证 0 延迟跟手
+  // 1. 触摸开始
   const handleTouchStart = (e) => {
-    // 如果菜单已打开，点击任何位置都是复原
-    if (offsetX !== 0) {
-       resetSwipe();
-       // 阻止事件穿透，防止误触内部按钮
-       return; 
-    }
+    setIsAnimating(false); // 拖动时立刻停止动画，保证跟手
     startX.current = e.touches[0].clientX;
-    currentX.current = 0;
-    setIsAnimating(false); // 🔴 关键：拖动时必须关闭动画
+    startOffset.current = offsetX; // 🔴 关键：记住我们是从哪里开始滑的（0 还是 -80）
   };
 
-  // 2. 触摸移动：增加阻尼感逻辑
+  // 2. 触摸移动
   const handleTouchMove = (e) => {
-    // 如果正在复原状态（比如刚才点了一下），不允许拖拽
-    if (offsetX !== 0 && isAnimating) return;
+    const currentTouchX = e.touches[0].clientX;
+    const diff = currentTouchX - startX.current;
+    
+    // 🔴 核心算法：目标位置 = 初始偏移 + 手指移动距离
+    let newOffset = startOffset.current + diff;
 
-    const touchX = e.touches[0].clientX;
-    const diff = touchX - startX.current;
-
-    // 🔴 核心手感逻辑：
-    // 向左滑 (diff < 0): 正常跟随，但超过 -100px 后增加阻力
-    // 向右滑 (diff > 0): 增加极大阻力 (diff / 3)，模拟“拉不动”的感觉
-    let newX = 0;
-    if (diff < 0) {
-       newX = diff > -100 ? diff : -100 + (diff + 100) * 0.2; 
-    } else {
-       newX = diff * 0.3; // 右滑阻尼
+    // 增加阻尼感 (Rubber Banding)
+    if (newOffset < -80) {
+        // 向左拉过头了 (露出删除键后继续拉)
+        newOffset = -80 + (newOffset + 80) * 0.2; 
+    } else if (newOffset > 0) {
+        // 向右拉过头了 (正常状态下继续右拉)
+        newOffset = newOffset * 0.2;
     }
-
-    setOffsetX(newX);
-    currentX.current = newX;
+    
+    setOffsetX(newOffset);
   };
 
-  // 3. 触摸结束：判断意图，开启弹簧动画
+  // 3. 触摸结束
   const handleTouchEnd = () => {
-    setIsAnimating(true); // 🔴 关键：松手瞬间开启平滑过渡
+    setIsAnimating(true); // 开启回弹动画
     
-    // 阈值判定：向左滑超过 60px 视为“打开”，否则“回弹”
-    if (currentX.current < -60) {
-      setOffsetX(-80); // 停在删除按钮位置
+    // 🔴 智能吸附逻辑：
+    // 只要滑动的“露出部分”超过一半 (40px)，就自动展开/关闭
+    if (offsetX < -40) {
+        setOffsetX(-80); // 吸附到“打开删除”
     } else {
-      setOffsetX(0);   // 回弹归零
+        setOffsetX(0);   // 吸附到“关闭/原位”
     }
   };
 
@@ -754,14 +748,15 @@ const SwipeableTaskCard = ({
   const showDebtWarning = isCompleted && isTimeDebt;
 
   return (
+    // 🔴 视觉优化：高度改为 h-32 (128px) 给底部更多空间，防止按钮贴底
     <div 
-      className="relative h-28 w-full mb-3 select-none isolate"
-      style={{ touchAction: 'pan-y' }} // 锁定垂直滚动，把水平控制权交给 JS
+      className="relative h-32 w-full mb-3 select-none isolate"
+      style={{ touchAction: 'pan-y' }}
     >
       {/* === 层级 1: 背景层 (红色删除区) === */}
       <div 
-        className={`absolute inset-0 bg-rose-600 flex items-center justify-end pr-6 rounded-2xl z-0 transition-opacity duration-200 ${
-           // 滑动一点点就显示背景，避免红线，但静止时隐藏
+        className={`absolute inset-0 bg-rose-600 flex items-center justify-end pr-8 rounded-2xl z-0 transition-opacity duration-200 ${
+           // 微调：滑动超过 2px 就显示红底，避免红线瑕疵
            offsetX < -2 ? 'opacity-100' : 'opacity-0'
         }`}
       >
@@ -770,9 +765,9 @@ const SwipeableTaskCard = ({
              e.stopPropagation();
              handleTaskAction("delete", task.id);
           }}
-          className="flex flex-col items-center text-white font-bold gap-1 w-16"
+          className="flex flex-col items-center text-white font-bold gap-1 scale-110"
         >
-          <Trash2 size={24} />
+          <Trash2 size={20} />
           <span className="text-[10px]">删除</span>
         </button>
       </div>
@@ -780,7 +775,6 @@ const SwipeableTaskCard = ({
       {/* === 层级 2: 前景层 (卡片主体) === */}
       <div
         className={`absolute inset-0 z-10 rounded-2xl flex flex-col border overflow-hidden
-          ${/* 🔴 只有在松手回弹时 (isAnimating) 才应用 transition，拖拽时移除它 */ ""}
           ${isAnimating ? "transition-transform duration-500 cubic-bezier(0.18, 0.89, 0.32, 1.28)" : ""} 
           ${isActive 
             ? "bg-[#1e293b] border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]" 
@@ -793,9 +787,10 @@ const SwipeableTaskCard = ({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        // 点击卡片本体也能复原，体验更好
+        // 点击卡片非按钮区域，也可以复原
         onClick={(e) => {
-            if (offsetX !== 0) {
+            if (Math.abs(offsetX) > 5) {
+                e.preventDefault(); // 防止触发折叠
                 e.stopPropagation();
                 resetSwipe();
             }
@@ -803,7 +798,7 @@ const SwipeableTaskCard = ({
       >
         {/* === 区域 A: 顶部 === */}
         <div className="flex justify-between items-start p-5 pb-0">
-          <div className="flex flex-col gap-1 overflow-hidden pr-2">
+          <div className="flex flex-col gap-1.5 overflow-hidden pr-2">
             <div className="flex items-center gap-2">
               {xpType === "growth" && <span className="text-[9px] font-bold bg-purple-500/20 text-purple-300 px-1.5 rounded border border-purple-500/30">进化</span>}
               {isBounty && <span className="text-[9px] font-bold bg-amber-500/20 text-amber-300 px-1.5 rounded border border-amber-500/30">悬赏</span>}
@@ -820,15 +815,15 @@ const SwipeableTaskCard = ({
           </div>
         </div>
 
-        {/* === 区域 B: 底部 === */}
-        {/* 🔴 视觉优化：将 pb-5 改为 pb-6，给底部按钮更多呼吸空间 */}
+        {/* === 区域 B: 底部 (数据 + 控制台) === */}
+        {/* 🔴 视觉优化：pb-6 保证按钮不贴底 */}
         <div className="mt-auto px-5 pb-6 pt-2 flex items-end justify-between gap-2">
           
           <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-            <div className="shrink-0 px-2 py-1 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-mono flex items-center gap-1 font-bold">
+            <div className="shrink-0 px-2 py-1.5 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-mono flex items-center gap-1 font-bold">
               <Zap size={12} fill="currentColor" /> {currentXP}
             </div>
-            <div className={`px-2 py-1 rounded-md border text-xs font-mono font-bold flex items-center gap-1 truncate max-w-[100px] ${
+            <div className={`px-2 py-1.5 rounded-md border text-xs font-mono font-bold flex items-center gap-1 truncate max-w-[110px] ${
                 showDebtWarning ? "text-rose-400 border-rose-500/30 bg-rose-500/5" : 
                 "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
             }`}>
@@ -837,17 +832,18 @@ const SwipeableTaskCard = ({
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
+             {/* 🔴 核心修复：统一所有按钮尺寸为 w-9 h-9 (36px)，防止切换状态时跳动 */}
              {isCompleted ? (
                 <>
                    <button 
                       onClick={(e) => { e.stopPropagation(); handleRevenueEdit(task); }}
-                      className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center border border-emerald-500/30 hover:bg-emerald-500/20 transition-all"
+                      className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center border border-emerald-500/30 hover:bg-emerald-500/20 transition-all active:scale-90"
                    >
-                      <RefreshCcw size={14} />
+                      <RefreshCcw size={15} />
                    </button>
                    <button 
                       onClick={(e) => { e.stopPropagation(); handleTaskAction("revert", task.id); }}
-                      className="w-8 h-8 rounded-full bg-slate-700/50 text-slate-400 flex items-center justify-center hover:text-white transition-all"
+                      className="w-9 h-9 rounded-xl bg-slate-700/50 text-slate-400 flex items-center justify-center hover:text-white transition-all active:scale-90"
                    >
                       <Undo2 size={16} />
                    </button>
@@ -856,7 +852,7 @@ const SwipeableTaskCard = ({
                 <>
                    <button 
                       onClick={(e) => { e.stopPropagation(); handleTaskAction("toggle", task.id); }}
-                      className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-lg active:scale-95 ${
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all shadow-lg active:scale-90 ${
                          isActive 
                          ? "bg-amber-500 text-slate-900 shadow-amber-500/30" 
                          : "bg-slate-700 text-white hover:bg-slate-600"
@@ -866,9 +862,9 @@ const SwipeableTaskCard = ({
                    </button>
                    <button 
                       onClick={(e) => { e.stopPropagation(); handleTaskAction("complete", task.id); }}
-                      className="w-10 h-10 rounded-full border-2 border-emerald-500 text-emerald-500 flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all active:scale-95"
+                      className="w-9 h-9 rounded-xl border-2 border-emerald-500 text-emerald-500 flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all active:scale-90"
                    >
-                      <CheckSquare size={18} />
+                      <CheckSquare size={16} />
                    </button>
                 </>
              )}
@@ -1878,7 +1874,7 @@ const App = () => {
                     暂无战斗部署，请新建项目。
                   </div>
                 )}
-                
+
                 {/* 任务分组渲染 */}
               {/* 👇👇👇 任务分组渲染 (Grid 动画版) 👇👇👇 */}
               {groupedTasks.map((group) => {
