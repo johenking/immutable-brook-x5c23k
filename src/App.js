@@ -668,7 +668,7 @@ const CalendarView = ({ type, data, onSelectDate }) => {
     </div>
   );
 };
-// --- 左滑删除卡片组件 (终极修复版 V2：防红边、增加呼吸感、丝滑手势) ---
+// --- 左滑删除卡片组件 (终极手感优化版 V3：物理跟手、全向阻尼、视觉呼吸感) ---
 const SwipeableTaskCard = ({
   task,
   isActive,
@@ -681,41 +681,54 @@ const SwipeableTaskCard = ({
   handleRevenueEdit,
 }) => {
   const [offsetX, setOffsetX] = useState(0);
-  const [isAnimating, setIsAnimating] = useState(false);
+  const [isAnimating, setIsAnimating] = useState(false); // 控制松手时的回弹动画
   const startX = useRef(0);
   const currentX = useRef(0);
 
-  // 1. 触摸开始
+  // 1. 触摸开始：瞬间移除动画，保证 0 延迟跟手
   const handleTouchStart = (e) => {
-    if (offsetX < 0) {
+    // 如果菜单已打开，点击任何位置都是复原
+    if (offsetX !== 0) {
        resetSwipe();
-       return;
+       // 阻止事件穿透，防止误触内部按钮
+       return; 
     }
     startX.current = e.touches[0].clientX;
     currentX.current = 0;
-    setIsAnimating(false);
+    setIsAnimating(false); // 🔴 关键：拖动时必须关闭动画
   };
 
-  // 2. 触摸移动
+  // 2. 触摸移动：增加阻尼感逻辑
   const handleTouchMove = (e) => {
+    // 如果正在复原状态（比如刚才点了一下），不允许拖拽
+    if (offsetX !== 0 && isAnimating) return;
+
     const touchX = e.touches[0].clientX;
     const diff = touchX - startX.current;
 
-    // 优化：只有向左滑才处理，且增加阻尼感
-    if (diff < 0 && diff > -120) {
-      setOffsetX(diff);
-      currentX.current = diff;
+    // 🔴 核心手感逻辑：
+    // 向左滑 (diff < 0): 正常跟随，但超过 -100px 后增加阻力
+    // 向右滑 (diff > 0): 增加极大阻力 (diff / 3)，模拟“拉不动”的感觉
+    let newX = 0;
+    if (diff < 0) {
+       newX = diff > -100 ? diff : -100 + (diff + 100) * 0.2; 
+    } else {
+       newX = diff * 0.3; // 右滑阻尼
     }
+
+    setOffsetX(newX);
+    currentX.current = newX;
   };
 
-  // 3. 触摸结束
+  // 3. 触摸结束：判断意图，开启弹簧动画
   const handleTouchEnd = () => {
-    setIsAnimating(true);
-    // 阈值判定：滑过 60px 就展开
+    setIsAnimating(true); // 🔴 关键：松手瞬间开启平滑过渡
+    
+    // 阈值判定：向左滑超过 60px 视为“打开”，否则“回弹”
     if (currentX.current < -60) {
-      setOffsetX(-80);
+      setOffsetX(-80); // 停在删除按钮位置
     } else {
-      setOffsetX(0);
+      setOffsetX(0);   // 回弹归零
     }
   };
 
@@ -743,16 +756,13 @@ const SwipeableTaskCard = ({
   return (
     <div 
       className="relative h-28 w-full mb-3 select-none isolate"
-      // 🟢 关键修复：告诉浏览器，这个区域只允许“上下拖动页面”，左右滑动由 JS 接管
-      // 这能极大解决滑动卡顿和页面乱晃的问题
-      style={{ touchAction: 'pan-y' }}
+      style={{ touchAction: 'pan-y' }} // 锁定垂直滚动，把水平控制权交给 JS
     >
       {/* === 层级 1: 背景层 (红色删除区) === */}
       <div 
         className={`absolute inset-0 bg-rose-600 flex items-center justify-end pr-6 rounded-2xl z-0 transition-opacity duration-200 ${
-           // 🟢 关键修复：只有当真的开始滑动(offsetX < -5)时，才显示红色背景
-           // 这样静止状态下，绝对不会有红线透出来
-           offsetX < -5 ? 'opacity-100' : 'opacity-0'
+           // 滑动一点点就显示背景，避免红线，但静止时隐藏
+           offsetX < -2 ? 'opacity-100' : 'opacity-0'
         }`}
       >
         <button
@@ -770,7 +780,8 @@ const SwipeableTaskCard = ({
       {/* === 层级 2: 前景层 (卡片主体) === */}
       <div
         className={`absolute inset-0 z-10 rounded-2xl flex flex-col border overflow-hidden
-          ${isAnimating ? "transition-transform duration-300 cubic-bezier(0.2, 0.8, 0.2, 1)" : ""} 
+          ${/* 🔴 只有在松手回弹时 (isAnimating) 才应用 transition，拖拽时移除它 */ ""}
+          ${isAnimating ? "transition-transform duration-500 cubic-bezier(0.18, 0.89, 0.32, 1.28)" : ""} 
           ${isActive 
             ? "bg-[#1e293b] border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]" 
             : showDebtWarning
@@ -782,10 +793,16 @@ const SwipeableTaskCard = ({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        onClick={resetSwipe}
+        // 点击卡片本体也能复原，体验更好
+        onClick={(e) => {
+            if (offsetX !== 0) {
+                e.stopPropagation();
+                resetSwipe();
+            }
+        }}
       >
-        {/* === 区域 A: 顶部 (标题 + 实时计时器) === */}
-        <div className="flex justify-between items-start p-5 pb-0"> {/* 🟢 微调：p-4 -> p-5 */}
+        {/* === 区域 A: 顶部 === */}
+        <div className="flex justify-between items-start p-5 pb-0">
           <div className="flex flex-col gap-1 overflow-hidden pr-2">
             <div className="flex items-center gap-2">
               {xpType === "growth" && <span className="text-[9px] font-bold bg-purple-500/20 text-purple-300 px-1.5 rounded border border-purple-500/30">进化</span>}
@@ -803,10 +820,9 @@ const SwipeableTaskCard = ({
           </div>
         </div>
 
-        {/* === 区域 B: 底部 (数据 + 控制台) === */}
-        {/* 🟢 关键修复：mt-auto 保持不变，但父容器 padding 增加，视觉上会抬高 */}
-        {/* 🟢 关键修复：pb-5 (原本是 p-4)，让底部留白更多，不贴边 */}
-        <div className="mt-auto px-5 pb-5 pt-2 flex items-end justify-between gap-2">
+        {/* === 区域 B: 底部 === */}
+        {/* 🔴 视觉优化：将 pb-5 改为 pb-6，给底部按钮更多呼吸空间 */}
+        <div className="mt-auto px-5 pb-6 pt-2 flex items-end justify-between gap-2">
           
           <div className="flex items-center gap-2 min-w-0 overflow-hidden">
             <div className="shrink-0 px-2 py-1 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-mono flex items-center gap-1 font-bold">
@@ -1862,43 +1878,53 @@ const App = () => {
                     暂无战斗部署，请新建项目。
                   </div>
                 )}
-
+                
                 {/* 任务分组渲染 */}
-               {/* 👇👇👇 任务分组渲染 (清爽作战室版：智能折叠 + 严格布局) 👇👇👇 */}
-               {groupedTasks.map((group) => {
-                  // 逻辑保持不变：判断当前组是否展开
+              {/* 👇👇👇 任务分组渲染 (Grid 动画版) 👇👇👇 */}
+              {groupedTasks.map((group) => {
                   const isExpanded = expandedGroups[group.name];
-                  
+
                   return (
-                    <div key={group.name} className="space-y-2">
-                      {/* === 分组标题栏 (这部分代码保留原样，负责点击展开/折叠) === */}
-                      <div className="flex items-center gap-3 py-2 px-1 cursor-pointer select-none group/header" onClick={() => toggleGroup(group.name)}>
-                         <div className={`p-1.5 rounded-lg border transition-all duration-300 ${isExpanded ? "bg-blue-500/20 border-blue-500/30 text-blue-400 rotate-90" : "bg-slate-800/50 border-white/5 text-slate-500 rotate-0"}`}>
-                            <ChevronRight size={14} />
-                         </div>
-                         <h3 className={`text-xs font-bold uppercase tracking-widest ${isExpanded ? "text-white" : "text-slate-500"}`}>{group.name}</h3>
-                         <div className="h-px bg-slate-800 flex-1 ml-2 group-hover/header:bg-slate-700 transition-colors"></div>
-                         <span className="text-[10px] text-slate-600 font-mono"> {formatTime(group.totalTime)} · ¥{group.totalRev.toFixed(0)}</span>
+                    <div key={group.name} className="space-y-0"> {/* 间距由内部控制 */}
+                      {/* 分组标题栏 */}
+                      <div
+                        className="flex items-center gap-3 py-3 px-1 cursor-pointer select-none group/header"
+                        onClick={() => toggleGroup(group.name)}
+                      >
+                        <div className={`p-1.5 rounded-lg border transition-all duration-300 ${isExpanded ? "bg-blue-500/20 border-blue-500/30 text-blue-400 rotate-90" : "bg-slate-800/50 border-white/5 text-slate-500 rotate-0"}`}>
+                          <ChevronRight size={14} />
+                        </div>
+                        <h3 className={`text-xs font-bold uppercase tracking-widest ${isExpanded ? "text-white" : "text-slate-500"}`}>
+                          {group.name}
+                        </h3>
+                        <div className="h-px bg-slate-800 flex-1 ml-2 group-hover/header:bg-slate-700 transition-colors"></div>
+                        <span className="text-[10px] text-slate-600 font-mono">
+                          {formatTime(group.totalTime)} · ¥{group.totalRev.toFixed(0)}
+                        </span>
                       </div>
 
-                      {/* === 任务列表区域 === */}
-                      {isExpanded && (
-                         <div className="animate-slide-up origin-top space-y-3">
-                            {group.tasks.map((task) => {
-                               // 1. 这里只保留最核心的状态判断
-                               const isActive = activeTaskId === task.id;
-                               const isCompleted = task.status === "Completed";
-                               const isBounty = task.mode === 'bounty';
-                               const taskHours = (task.duration || 0) / 3600;
-                               const currentRev = task.actualRevenue || ((task.duration || 0)/3600 * task.hourlyRate);
-                               const realHourlyRate = taskHours > 0 ? currentRev / taskHours : 0;
-                               
-                               // 2. 计算是否是“时间负债”
-                               const isTimeDebt = !isBounty && isCompleted && taskHours > 0 && realHourlyRate < HOURLY_THRESHOLD;
-                               
-                               // 3. ✨ 重点：原本这里那几百行渲染卡片的 HTML，现在变成了下面这就一行组件
-                               // 所有的 UI 细节、按钮逻辑、滑动删除，都在这个组件内部实现了
-                               return (
+                      {/* 🔴 核心动画修改：使用 CSS Grid 实现手风琴效果 
+                          不再使用条件渲染 ({isExpanded && ...})
+                          grid-rows-[0fr] -> 高度为0，隐藏
+                          grid-rows-[1fr] -> 高度自动适应，展开
+                      */}
+                      <div 
+                        className={`grid transition-[grid-template-rows] duration-300 ease-out ${
+                          isExpanded ? "grid-rows-[1fr] mb-4" : "grid-rows-[0fr] mb-0"
+                        }`}
+                      >
+                        <div className="overflow-hidden min-h-0">
+                           <div className="pt-2 space-y-3"> {/* 内部增加一点 pt 防止贴太紧 */}
+                              {group.tasks.map((task) => {
+                                const isActive = activeTaskId === task.id;
+                                const isCompleted = task.status === "Completed";
+                                const isBounty = task.mode === 'bounty';
+                                const taskHours = (task.duration || 0) / 3600;
+                                const currentRev = task.actualRevenue || ((task.duration || 0)/3600 * task.hourlyRate);
+                                const realHourlyRate = taskHours > 0 ? currentRev / taskHours : 0;
+                                const isTimeDebt = !isBounty && isCompleted && taskHours > 0 && realHourlyRate < HOURLY_THRESHOLD;
+                                
+                                return (
                                   <SwipeableTaskCard 
                                      key={task.id}
                                      task={task}
@@ -1911,10 +1937,11 @@ const App = () => {
                                      setRevenueInput={setRevenueInput}
                                      handleRevenueEdit={handleRevenueEdit}
                                   />
-                               );
-                            })}
-                         </div>
-                      )}
+                                );
+                              })}
+                           </div>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
