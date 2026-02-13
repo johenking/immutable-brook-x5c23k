@@ -622,7 +622,8 @@ const CalendarView = ({ type, data, onSelectDate }) => {
                   {/* 如果有钱，显示绿色金额 */}
                   {item.totalRevenue > 0 ? (
                     <span className="text-[9px] font-mono font-bold text-emerald-400">
-                      ¥{item.totalRevenue}
+                      {/* 🔴 修复：日历格子空间小，强制取整 (toFixed(0)) */}
+                      ¥{Number(item.totalRevenue).toFixed(0)}
                     </span>
                   ) : (
                     // 如果没钱只有时间，显示个小横杠或者时长
@@ -2514,7 +2515,8 @@ const App = () => {
                   {reportData.tasks.reduce(
                     (acc, t) => acc + (t.actualRevenue || 0),
                     0
-                  )}
+                  ).toFixed(2)
+                  }
                 </div>
               </div>
             </div>
@@ -2559,7 +2561,7 @@ const App = () => {
                         </span>
                         {task.actualRevenue > 0 && (
                           <span className="text-[10px] font-mono text-emerald-500">
-                            +¥{task.actualRevenue}
+                            +¥{Number(task.actualRevenue).toFixed(2)}
                           </span>
                         )}
                       </div>
