@@ -668,7 +668,7 @@ const CalendarView = ({ type, data, onSelectDate }) => {
     </div>
   );
 };
-// --- 左滑删除卡片组件 (终极版 V5：方向锁、智能防抖、自动计时恢复) ---
+// --- 左滑删除卡片组件 (终极美学版 V7：双层网格布局、完美对齐) ---
 const SwipeableTaskCard = ({
   task,
   isActive,
@@ -683,25 +683,22 @@ const SwipeableTaskCard = ({
   const [offsetX, setOffsetX] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
   
-  // Ref 引用：记录触摸起始点
   const startX = useRef(0);
-  const startY = useRef(0); // 🔴 新增：记录垂直起始点
+  const startY = useRef(0);
   const startOffset = useRef(0);
-  // 🔴 新增：方向锁。一旦锁定为“垂直滚动”，这次触摸就永远不移动卡片
   const isVerticalScroll = useRef(false); 
 
   // 1. 触摸开始
   const handleTouchStart = (e) => {
     setIsAnimating(false);
     startX.current = e.touches[0].clientX;
-    startY.current = e.touches[0].clientY; // 记录 Y 轴
+    startY.current = e.touches[0].clientY;
     startOffset.current = offsetX;
-    isVerticalScroll.current = false; // 重置方向锁
+    isVerticalScroll.current = false;
   };
 
   // 2. 触摸移动
   const handleTouchMove = (e) => {
-    // 如果已经判定为垂直滚动，直接忽略，让浏览器处理页面滚动
     if (isVerticalScroll.current) return;
 
     const currentTouchX = e.touches[0].clientX;
@@ -710,20 +707,15 @@ const SwipeableTaskCard = ({
     const diffX = currentTouchX - startX.current;
     const diffY = currentTouchY - startY.current;
 
-    // 🔴 核心算法：首次移动时进行判定
-    // 如果垂直移动距离 > 水平移动距离，说明用户想滚屏
-    // 我们就锁死这个状态，本次触摸不再处理任何卡片滑动
     if (Math.abs(diffY) > Math.abs(diffX) && Math.abs(diffY) > 5) {
         isVerticalScroll.current = true;
         return;
     }
 
-    // 只有水平意图明显时，才阻止浏览器默认行为（防止页面抖动）并移动卡片
     if (e.cancelable && Math.abs(diffX) > 5) {
-        // e.preventDefault(); // 注：React 18 被动事件可能无法阻止，依靠 touch-action: pan-y 辅助
+        // e.preventDefault(); 
     }
 
-    // 正常的滑动逻辑
     let newOffset = startOffset.current + diffX;
 
     if (newOffset < -80) {
@@ -766,13 +758,17 @@ const SwipeableTaskCard = ({
 
   const showDebtWarning = isCompleted && isTimeDebt;
 
+  // 🔴 日期处理：确保有值，如果数据库里没有 createdAt，就用当前时间兜底
+  const dateObj = task.createdAt ? new Date(task.createdAt) : new Date();
+  const dateStr = dateObj.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }).replace('/', '-');
+
   return (
+    // 🔴 视觉优化：高度改为 h-36 (144px)，给三行布局留足空间
     <div 
-      className="relative h-32 w-full mb-3 select-none isolate"
-      // 🔴 touchAction: 'pan-y' 配合 JS 方向锁，是移动端最佳实践
+      className="relative h-36 w-full mb-3 select-none isolate"
       style={{ touchAction: 'pan-y' }}
     >
-      {/* 背景层 */}
+      {/* 背景层 (删除按钮) */}
       <div 
         className={`absolute inset-0 bg-rose-600 flex items-center justify-end pr-8 rounded-2xl z-0 transition-opacity duration-200 ${
            offsetX < -2 ? 'opacity-100' : 'opacity-0'
@@ -790,9 +786,9 @@ const SwipeableTaskCard = ({
         </button>
       </div>
 
-      {/* 前景层 */}
+      {/* 前景层 (卡片内容) */}
       <div
-        className={`absolute inset-0 z-10 rounded-2xl flex flex-col border overflow-hidden
+        className={`absolute inset-0 z-10 rounded-2xl flex flex-col border overflow-hidden px-5 py-4
           ${isAnimating ? "transition-transform duration-500 cubic-bezier(0.18, 0.89, 0.32, 1.28)" : ""} 
           ${isActive 
             ? "bg-[#1e293b] border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]" 
@@ -813,27 +809,39 @@ const SwipeableTaskCard = ({
             }
         }}
       >
-        {/* 顶部 */}
-        <div className="flex justify-between items-start p-5 pb-0">
-          <div className="flex flex-col gap-1.5 overflow-hidden pr-2">
+        {/* === 第一行：元数据层 (标签 + 日期) === */}
+        {/* 🔴 修复：两端对齐，日期显示在右上角 */}
+        <div className="flex justify-between items-center mb-1">
             <div className="flex items-center gap-2">
-              {xpType === "growth" && <span className="text-[9px] font-bold bg-purple-500/20 text-purple-300 px-1.5 rounded border border-purple-500/30">进化</span>}
-              {isBounty && <span className="text-[9px] font-bold bg-amber-500/20 text-amber-300 px-1.5 rounded border border-amber-500/30">悬赏</span>}
+              {xpType === "growth" && <span className="text-[9px] font-bold bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded border border-purple-500/30">进化</span>}
+              {xpType === "maintenance" && <span className="text-[9px] font-bold bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30">维持</span>}
+              {isBounty && <span className="text-[9px] font-bold bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">悬赏</span>}
+              {!xpType && !isBounty && <span className="text-[9px] font-bold bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/30">搬砖</span>}
             </div>
-            <h4 className={`font-bold text-base truncate ${isCompleted ? "text-slate-500 line-through" : "text-slate-100"}`}>
-              {task.title}
-            </h4>
-          </div>
-
-          <div className={`shrink-0 border px-2 py-1 rounded-lg ${isActive ? 'bg-blue-500/10 border-blue-500/30' : 'bg-black/40 border-white/10'}`}>
-             <span className={`font-mono text-sm font-bold ${isActive ? 'text-blue-400' : 'text-slate-500'}`}>
-                {formatTime(task.duration)}
-             </span>
-          </div>
+            
+            {/* 日期显示 */}
+            <span className="text-[10px] font-mono text-slate-500/60 font-bold tracking-wider">
+               {dateStr}
+            </span>
         </div>
 
-        {/* 底部 */}
-        <div className="mt-auto px-5 pb-6 pt-2 flex items-end justify-between gap-2">
+        {/* === 第二行：核心层 (标题 + 计时器) === */}
+        {/* 🔴 修复：居中对齐 (items-center)，保证标题和时间在同一水平线 */}
+        <div className="flex justify-between items-center mb-auto pt-1">
+            <h4 className={`font-bold text-base truncate pr-3 ${isCompleted ? "text-slate-500 line-through" : "text-slate-100"}`}>
+              {task.title}
+            </h4>
+
+            <div className={`shrink-0 px-2 py-1 rounded-lg border flex items-center justify-center ${isActive ? 'bg-blue-500/10 border-blue-500/30' : 'bg-black/40 border-white/10'}`}>
+               <span className={`font-mono text-sm font-bold leading-none ${isActive ? 'text-blue-400' : 'text-slate-500'}`}>
+                  {formatTime(task.duration)}
+               </span>
+            </div>
+        </div>
+
+        {/* === 第三行：底部控制层 (数据 + 按钮) === */}
+        {/* 🔴 修复：底部留白已经在父容器 padding 统一控制，这里只需 justify-between */}
+        <div className="flex items-center justify-between pt-2 mt-2 border-t border-white/5">
           
           <div className="flex items-center gap-2 min-w-0 overflow-hidden">
             <div className="shrink-0 px-2 py-1.5 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-mono flex items-center gap-1 font-bold">
