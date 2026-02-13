@@ -668,8 +668,7 @@ const CalendarView = ({ type, data, onSelectDate }) => {
     </div>
   );
 };
-
-// --- 左滑删除卡片组件 (终极完美版 V4：双向手势、统一尺寸、拒绝抖动) ---
+// --- 左滑删除卡片组件 (终极版 V5：方向锁、智能防抖、自动计时恢复) ---
 const SwipeableTaskCard = ({
   task,
   isActive,
@@ -683,30 +682,53 @@ const SwipeableTaskCard = ({
 }) => {
   const [offsetX, setOffsetX] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
+  
+  // Ref 引用：记录触摸起始点
   const startX = useRef(0);
-  const startOffset = useRef(0); // 🔴 新增：记录按下时的初始偏移量
+  const startY = useRef(0); // 🔴 新增：记录垂直起始点
+  const startOffset = useRef(0);
+  // 🔴 新增：方向锁。一旦锁定为“垂直滚动”，这次触摸就永远不移动卡片
+  const isVerticalScroll = useRef(false); 
 
   // 1. 触摸开始
   const handleTouchStart = (e) => {
-    setIsAnimating(false); // 拖动时立刻停止动画，保证跟手
+    setIsAnimating(false);
     startX.current = e.touches[0].clientX;
-    startOffset.current = offsetX; // 🔴 关键：记住我们是从哪里开始滑的（0 还是 -80）
+    startY.current = e.touches[0].clientY; // 记录 Y 轴
+    startOffset.current = offsetX;
+    isVerticalScroll.current = false; // 重置方向锁
   };
 
   // 2. 触摸移动
   const handleTouchMove = (e) => {
-    const currentTouchX = e.touches[0].clientX;
-    const diff = currentTouchX - startX.current;
-    
-    // 🔴 核心算法：目标位置 = 初始偏移 + 手指移动距离
-    let newOffset = startOffset.current + diff;
+    // 如果已经判定为垂直滚动，直接忽略，让浏览器处理页面滚动
+    if (isVerticalScroll.current) return;
 
-    // 增加阻尼感 (Rubber Banding)
+    const currentTouchX = e.touches[0].clientX;
+    const currentTouchY = e.touches[0].clientY;
+    
+    const diffX = currentTouchX - startX.current;
+    const diffY = currentTouchY - startY.current;
+
+    // 🔴 核心算法：首次移动时进行判定
+    // 如果垂直移动距离 > 水平移动距离，说明用户想滚屏
+    // 我们就锁死这个状态，本次触摸不再处理任何卡片滑动
+    if (Math.abs(diffY) > Math.abs(diffX) && Math.abs(diffY) > 5) {
+        isVerticalScroll.current = true;
+        return;
+    }
+
+    // 只有水平意图明显时，才阻止浏览器默认行为（防止页面抖动）并移动卡片
+    if (e.cancelable && Math.abs(diffX) > 5) {
+        // e.preventDefault(); // 注：React 18 被动事件可能无法阻止，依靠 touch-action: pan-y 辅助
+    }
+
+    // 正常的滑动逻辑
+    let newOffset = startOffset.current + diffX;
+
     if (newOffset < -80) {
-        // 向左拉过头了 (露出删除键后继续拉)
         newOffset = -80 + (newOffset + 80) * 0.2; 
     } else if (newOffset > 0) {
-        // 向右拉过头了 (正常状态下继续右拉)
         newOffset = newOffset * 0.2;
     }
     
@@ -715,14 +737,11 @@ const SwipeableTaskCard = ({
 
   // 3. 触摸结束
   const handleTouchEnd = () => {
-    setIsAnimating(true); // 开启回弹动画
-    
-    // 🔴 智能吸附逻辑：
-    // 只要滑动的“露出部分”超过一半 (40px)，就自动展开/关闭
+    setIsAnimating(true);
     if (offsetX < -40) {
-        setOffsetX(-80); // 吸附到“打开删除”
+        setOffsetX(-80);
     } else {
-        setOffsetX(0);   // 吸附到“关闭/原位”
+        setOffsetX(0);
     }
   };
 
@@ -748,15 +767,14 @@ const SwipeableTaskCard = ({
   const showDebtWarning = isCompleted && isTimeDebt;
 
   return (
-    // 🔴 视觉优化：高度改为 h-32 (128px) 给底部更多空间，防止按钮贴底
     <div 
       className="relative h-32 w-full mb-3 select-none isolate"
+      // 🔴 touchAction: 'pan-y' 配合 JS 方向锁，是移动端最佳实践
       style={{ touchAction: 'pan-y' }}
     >
-      {/* === 层级 1: 背景层 (红色删除区) === */}
+      {/* 背景层 */}
       <div 
         className={`absolute inset-0 bg-rose-600 flex items-center justify-end pr-8 rounded-2xl z-0 transition-opacity duration-200 ${
-           // 微调：滑动超过 2px 就显示红底，避免红线瑕疵
            offsetX < -2 ? 'opacity-100' : 'opacity-0'
         }`}
       >
@@ -772,7 +790,7 @@ const SwipeableTaskCard = ({
         </button>
       </div>
 
-      {/* === 层级 2: 前景层 (卡片主体) === */}
+      {/* 前景层 */}
       <div
         className={`absolute inset-0 z-10 rounded-2xl flex flex-col border overflow-hidden
           ${isAnimating ? "transition-transform duration-500 cubic-bezier(0.18, 0.89, 0.32, 1.28)" : ""} 
@@ -787,16 +805,15 @@ const SwipeableTaskCard = ({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        // 点击卡片非按钮区域，也可以复原
         onClick={(e) => {
             if (Math.abs(offsetX) > 5) {
-                e.preventDefault(); // 防止触发折叠
+                e.preventDefault();
                 e.stopPropagation();
                 resetSwipe();
             }
         }}
       >
-        {/* === 区域 A: 顶部 === */}
+        {/* 顶部 */}
         <div className="flex justify-between items-start p-5 pb-0">
           <div className="flex flex-col gap-1.5 overflow-hidden pr-2">
             <div className="flex items-center gap-2">
@@ -815,8 +832,7 @@ const SwipeableTaskCard = ({
           </div>
         </div>
 
-        {/* === 区域 B: 底部 (数据 + 控制台) === */}
-        {/* 🔴 视觉优化：pb-6 保证按钮不贴底 */}
+        {/* 底部 */}
         <div className="mt-auto px-5 pb-6 pt-2 flex items-end justify-between gap-2">
           
           <div className="flex items-center gap-2 min-w-0 overflow-hidden">
@@ -832,7 +848,6 @@ const SwipeableTaskCard = ({
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
-             {/* 🔴 核心修复：统一所有按钮尺寸为 w-9 h-9 (36px)，防止切换状态时跳动 */}
              {isCompleted ? (
                 <>
                    <button 
@@ -1234,10 +1249,15 @@ const App = () => {
     return;
   }
 
-  // --- 动作 4: 撤销完成 ---
+  // --- 动作 4: 撤销完成 (智能恢复) ---
   if (action === "revert") {
-    updates.status = "Pending";
+    // 修复逻辑：不仅去掉结束时间，还强制设为“进行中”，并立即激活计时器
+    updates.status = "In Progress"; 
     updates.endTime = null;
+    updates.duration = task.duration || 0; // 确保时间数据安全
+    
+    // 🔴 核心修复：让计时器重新锁定这个任务，立即开始跑数字
+    setActiveTaskId(taskId); 
   }
 
   // --- 动作 5: 手动修改金额 ---
@@ -1874,7 +1894,7 @@ const App = () => {
                     暂无战斗部署，请新建项目。
                   </div>
                 )}
-
+                
                 {/* 任务分组渲染 */}
               {/* 👇👇👇 任务分组渲染 (Grid 动画版) 👇👇👇 */}
               {groupedTasks.map((group) => {
