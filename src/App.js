@@ -863,22 +863,7 @@ const SwipeableTaskCard = ({
             <div className="shrink-0 px-2 py-1.5 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-mono flex items-center gap-1 font-bold">
               <Zap size={12} fill="currentColor" /> {currentXP}
             </div>
-            {/* ====== 🔴 4.2 新的金额胶囊：动态变色 + 徽章 ====== */}
-            <div className={`px-2 py-1.5 rounded-md border text-xs font-mono font-bold flex items-center gap-1 truncate max-w-[110px] transition-all duration-300 ${
-                showDebtWarning 
-                ? "text-rose-400 border-rose-500/30 bg-rose-500/5" : // 🚨 负债警告：暗红色
-                hasActualRevenue 
-                ? "text-amber-400 border-amber-500/50 bg-amber-500/10 shadow-[0_0_10px_rgba(245,158,11,0.15)]" : // 🌟 实际收益：金色高亮发光
-                "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" // 🌿 预测收益：默认绿色
-            }`}>
-               {/* 只有在手动核算后 (hasActualRevenue 为 true)，才显示这个 [实] 字小徽章 */}
-               {hasActualRevenue && (
-                  <span className="text-[9px] bg-amber-500/20 px-1 rounded-sm mr-0.5 font-sans leading-none pb-px text-amber-500 border border-amber-500/20">
-                     实
-                  </span>
-               )}
-               ¥ {Number(displayMoney).toFixed(2)}
-            </div>
+            {/* === 底部导航栏 === */}
           </div>
           <div className="flex items-center gap-3 shrink-0">
              {isCompleted ? (
@@ -1311,6 +1296,7 @@ const App = () => {
       );
     }
   }
+  };
   // 🔴 终极修复：处理验算逻辑 (修复长小数，支持清空撤回)
   const handleRevenueEdit = (task) => {
     setEditRevenueId(task.id);
