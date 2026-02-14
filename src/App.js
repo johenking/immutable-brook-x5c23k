@@ -112,13 +112,39 @@ const StyleLoader = () => {
       document.head.appendChild(script);
     }
   }, []);
-
   return (
     <style>{`
-      body { background-color: #020617; color: #f8fafc; font-family: sans-serif; margin: 0; }
-      ::-webkit-scrollbar { width: 6px; }
-      ::-webkit-scrollbar-track { background: #0f172a; }
-      ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+      /* 🔴 苹果原生体验级 CSS 注入 */
+      body { 
+        background-color: #020617; 
+        color: #f8fafc; 
+        /* 强制使用苹果原生的 SF Pro 字体，让文字排版极度顺滑 */
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; 
+        margin: 0; 
+        
+        /* 禁用网页的下拉刷新导致的橡皮筋乱跳效果 (让应用固定住) */
+        overscroll-behavior-y: none;
+        
+        /* 禁用点击按钮时网页自带的半透明灰色遮罩 */
+        -webkit-tap-highlight-color: transparent;
+        
+        /* 禁用全局的文本选中，防止滑动时不小心选中文字，只允许输入框选中 */
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      /* 允许输入框正常打字选中 */
+      input, textarea {
+        -webkit-user-select: auto;
+        user-select: auto;
+      }
+
+      ::-webkit-scrollbar { width: 4px; } /* 更加细长的原生滚动条 */
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+      
+      .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+      .animate-slide-up { animation-fill-mode: both !important; }
     `}</style>
   );
 };
@@ -1583,66 +1609,71 @@ const App = () => {
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 font-sans pb-24 animate-fade-in">
       <StyleLoader />
-      {/* 👇👇👇 新的 RPG 玩家状态栏 & 账号菜单 👇👇👇 */}
-      <div className="sticky top-0 z-40 bg-[#020617]/90 backdrop-blur-xl border-b border-white/5 px-4 py-3 shadow-lg">
-        <div className="flex justify-between items-center relative">
-          {/* 左侧：玩家状态 HUD */}
+      {/* 👇👇👇 新的 RPG 玩家状态栏 (完美适配 PC & 手机) 👇👇👇 */}
+      {/* 苹果级毛玻璃：backdrop-blur-2xl，半透明背景 */}
+      <div className="sticky top-0 z-40 bg-[#020617]/70 backdrop-blur-2xl border-b border-white/5 px-4 py-3 shadow-sm">
+        {/* 增加 max-w-4xl mx-auto，确保在电脑大屏上也不会拉伸得很丑 */}
+        <div className="flex justify-between items-center relative max-w-4xl mx-auto">
+          
+          {/* === 左侧：玩家状态 HUD === */}
           <div className="flex items-center gap-3 flex-1">
-            {/* 头像/等级徽章 */}
             <div className="relative">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20 border border-white/10">
-                <span className="font-bold text-white font-mono text-sm">
-                  Lv.{playerStats.level}
-                </span>
+                <span className="font-bold text-white font-mono text-sm">Lv.{playerStats.level}</span>
               </div>
-              {/* 在线状态点 */}
-              <div
-                className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-[#020617] ${
-                  isLocalMode ? "bg-amber-500" : "bg-emerald-500"
-                }`}
-              ></div>
+              <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-[#020617] ${isLocalMode ? "bg-amber-500" : "bg-emerald-500"}`}></div>
             </div>
 
-            {/* 经验条与头衔 */}
-            <div className="flex-1 max-w-[160px]">
+            <div className="flex-1 max-w-[140px]">
               <div className="flex justify-between items-end mb-1">
                 <span className="text-xs font-bold text-white tracking-wider flex items-center gap-1">
                   {playerStats.title}
-                  {isLocalMode && (
-                    <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1 rounded">
-                      OFFLINE
-                    </span>
-                  )}
+                  {isLocalMode && <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1 rounded">OFFLINE</span>}
                 </span>
-                <span className="text-[9px] font-mono text-blue-300">
-                  {playerStats.currentLevelXP}/{playerStats.nextLevelXP} XP
-                </span>
+                <span className="text-[9px] font-mono text-blue-300">{playerStats.currentLevelXP}/{playerStats.nextLevelXP}</span>
               </div>
-              {/* 经验槽 */}
-              <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden border border-white/5">
-                <div
-                  className="h-full bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"
-                  style={{ width: `${playerStats.progress}%` }}
-                ></div>
+              <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)]" style={{ width: `${playerStats.progress}%` }}></div>
               </div>
             </div>
           </div>
 
-          {/* 右侧：用户菜单触发器 */}
-          <button
-            onClick={() => setShowUserMenu(!showUserMenu)}
-            className="p-2 rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-colors relative"
-          >
-            {user?.photoURL ? (
-              <img
-                src={user.photoURL}
-                className="w-8 h-8 rounded-full border border-white/10"
-                alt="User"
-              />
-            ) : (
-              <LayoutDashboard size={24} />
-            )}
-          </button>
+          {/* === 中间：PC 端专属导航栏 (核心修复) === */}
+          {/* md:flex 表示在大于 iPad 宽度的屏幕上显示，absolute 绝对居中 */}
+          <div className="hidden md:flex items-center gap-10 absolute left-1/2 -translate-x-1/2">
+             <button 
+                onClick={() => setActiveTab("execution")} 
+                className={`text-sm font-bold flex items-center gap-2 transition-all ${activeTab === "execution" ? "text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.6)]" : "text-slate-500 hover:text-slate-300"}`}
+             >
+                <LayoutDashboard size={18}/> 作战
+             </button>
+             <button 
+                onClick={() => setActiveTab("audit")} 
+                className={`text-sm font-bold flex items-center gap-2 transition-all ${activeTab === "audit" ? "text-rose-400 drop-shadow-[0_0_8px_rgba(251,113,133,0.6)]" : "text-slate-500 hover:text-slate-300"}`}
+             >
+                <Heart size={18}/> 审计
+             </button>
+             <button 
+                onClick={() => setActiveTab("assets")} 
+                className={`text-sm font-bold flex items-center gap-2 transition-all ${activeTab === "assets" ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.6)]" : "text-slate-500 hover:text-slate-300"}`}
+             >
+                <ShieldCheck size={18}/> 资产
+             </button>
+          </div>
+
+          {/* === 右侧：用户菜单 === */}
+          <div className="flex-1 flex justify-end">
+             <button
+                onClick={() => setShowUserMenu(!showUserMenu)}
+                className="p-1 rounded-full hover:bg-white/5 text-slate-400 hover:text-white transition-colors active:scale-90"
+              >
+                {user?.photoURL ? (
+                  <img src={user.photoURL} className="w-8 h-8 rounded-full border border-white/10" alt="User" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center"><LayoutDashboard size={16} /></div>
+                )}
+             </button>
+          </div>
         </div>
 
         {/* 👇 账号切换下拉菜单 (解决切换难的问题) 👇 */}
