@@ -857,13 +857,24 @@ const SwipeableTaskCard = ({
             </div>
         </div>
 
-        {/* 底部 */}
-        <div className="flex items-center justify-between pt-2 mt-2 border-t border-white/5">
+      {/* 底部 */}
+      <div className="flex items-center justify-between pt-2 mt-2 border-t border-white/5">
           <div className="flex items-center gap-2 min-w-0 overflow-hidden">
             <div className="shrink-0 px-2 py-1.5 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-mono flex items-center gap-1 font-bold">
               <Zap size={12} fill="currentColor" /> {currentXP}
             </div>
-            {/* === 底部导航栏 === */}
+            
+            {/* 🔴 被你误删的金额胶囊找回来了，而且加上了变色魔法！ */}
+            <div className={`px-2 py-1.5 rounded-md border text-xs font-mono font-bold flex items-center gap-1 truncate max-w-[110px] transition-all duration-300 ${
+                showDebtWarning 
+                ? "text-rose-400 border-rose-500/30 bg-rose-500/5" : 
+                hasActualRevenue 
+                ? "text-amber-400 border-amber-500/50 bg-amber-500/10 shadow-[0_0_10px_rgba(245,158,11,0.15)]" : // 🌟 实际：金色发光
+                "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" // 🌿 预测：默认绿色
+            }`}>
+               {hasActualRevenue && <span className="text-[9px] bg-amber-500/20 px-1 rounded-sm mr-0.5 font-sans leading-none pb-px text-amber-500 border border-amber-500/20">实</span>}
+               ¥ {Number(displayMoney).toFixed(2)}
+            </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
              {isCompleted ? (
@@ -1091,29 +1102,38 @@ const App = () => {
     return () => clearInterval(interval);
   }, [activeTaskId]);
 
-  // --- Stats ---
+  // --- Stats (分离实际与预测) ---
   const stats = useMemo(() => {
     const completed = tasks.filter((t) => t.status === "Completed");
-    const totalDurationHrs =
-      tasks.reduce((acc, t) => acc + (t.duration || 0), 0) / 3600;
-    const totalRevenue = tasks.reduce(
-      (acc, t) => acc + (Number(t.actualRevenue) || 0),
-      0
-    );
+    const totalDurationHrs = tasks.reduce((acc, t) => acc + (t.duration || 0), 0) / 3600;
+    
+    // 🔴 1. 拆分：实际已核算的钱 vs 尚未核算的预测钱
+    let actualRev = 0;
+    let predictedRev = 0;
+
+    completed.forEach(t => {
+        if (t.actualRevenue != null) {
+            actualRev += Number(t.actualRevenue);
+        } else {
+            const isBounty = t.mode === 'bounty';
+            const p = isBounty ? (t.fixedReward || 0) : ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
+            predictedRev += p;
+        }
+    });
+
+    const totalRevenue = actualRev + predictedRev; // ROI 计算仍然用总钱数
     const avgROI = totalDurationHrs > 0 ? totalRevenue / totalDurationHrs : 0;
+    
     const timeDebtTasks = completed.filter((t) => {
       const hrs = (t.duration || 0) / 3600;
       return hrs > 0 && (t.actualRevenue || 0) / hrs < HOURLY_THRESHOLD;
     }).length;
+    
     const recentReviews = reviews.slice(0, 7);
-    const avgAgency =
-      recentReviews.length > 0
-        ? (
-            recentReviews.reduce((acc, r) => acc + Number(r.agency), 0) /
-            recentReviews.length
-          ).toFixed(1)
-        : 0;
-    return { totalDurationHrs, totalRevenue, avgROI, timeDebtTasks, avgAgency };
+    const avgAgency = recentReviews.length > 0 ? (recentReviews.reduce((acc, r) => acc + Number(r.agency), 0) / recentReviews.length).toFixed(1) : 0;
+    
+    // 🔴 2. 导出新变量
+    return { totalDurationHrs, totalRevenue, actualRev, predictedRev, avgROI, timeDebtTasks, avgAgency };
   }, [tasks, reviews]);
   // 👇👇👇 补上这段缺失的逻辑，白屏立刻就好 👇👇👇
   const [showUserMenu, setShowUserMenu] = useState(false); // 1. 控制菜单开关
@@ -1878,12 +1898,19 @@ const App = () => {
                 onClick={() => setSelectedStat("roi")}
               />
               <StatBox
-                label="累计营收"
-                value={`¥${stats.totalRevenue.toLocaleString()}`}
+                label="累计营收 (实际落袋)"
+                // 🔴 toLocaleString 限制最多2位小数，并自动加逗号 (如: 2,985.56)
+                value={`¥${stats.actualRev.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`}
                 unit=""
-                color="text-emerald-400"
+                color="text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.3)]" // 实际营收用金色
                 icon={<DollarSign size={14} />}
                 onClick={() => setSelectedStat("revenue")}
+                // 🔴 加入绿色的预测收益小标签
+                subNode={
+                    <div className="text-[10px] text-emerald-400 font-mono font-bold flex items-center gap-1 bg-emerald-500/10 w-fit px-1.5 py-0.5 rounded border border-emerald-500/20">
+                        +¥{stats.predictedRev.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} 预测
+                    </div>
+                }
               />
               <StatBox
                 label="总投入时长"
@@ -2786,10 +2813,10 @@ const App = () => {
   );
 };
 
-const StatBox = ({ label, value, unit, color, icon, onClick }) => (
+const StatBox = ({ label, value, unit, color, icon, onClick, subNode }) => (
   <div
     onClick={onClick}
-    className="bg-black/20 border border-white/5 hover:border-white/10 p-4 rounded-2xl cursor-pointer group transition-all active:scale-95"
+    className="bg-black/20 border border-white/5 hover:border-white/10 p-4 rounded-2xl cursor-pointer group transition-all active:scale-95 flex flex-col justify-between"
   >
     <div className="flex justify-between items-start mb-2">
       <div className="text-[10px] text-slate-500 uppercase font-bold flex items-center gap-1 group-hover:text-blue-400 transition-colors">
@@ -2800,11 +2827,13 @@ const StatBox = ({ label, value, unit, color, icon, onClick }) => (
         className="text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity"
       />
     </div>
-    <div className={`font-mono font-bold text-xl ${color}`}>
-      {value}
-      <span className="text-xs text-slate-600 ml-1 font-sans font-normal">
-        {unit}
-      </span>
+    <div>
+        <div className={`font-mono font-bold text-xl leading-none ${color}`}>
+          {value}
+          {unit && <span className="text-xs text-slate-600 ml-1 font-sans font-normal">{unit}</span>}
+        </div>
+        {/* 🔴 渲染额外的子信息（比如预测金额） */}
+        {subNode && <div className="mt-2">{subNode}</div>}
     </div>
   </div>
 );
