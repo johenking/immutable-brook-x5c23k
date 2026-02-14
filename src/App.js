@@ -112,39 +112,13 @@ const StyleLoader = () => {
       document.head.appendChild(script);
     }
   }, []);
+
   return (
     <style>{`
-      /* 🔴 苹果原生体验级 CSS 注入 */
-      body { 
-        background-color: #020617; 
-        color: #f8fafc; 
-        /* 强制使用苹果原生的 SF Pro 字体，让文字排版极度顺滑 */
-        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; 
-        margin: 0; 
-        
-        /* 禁用网页的下拉刷新导致的橡皮筋乱跳效果 (让应用固定住) */
-        overscroll-behavior-y: none;
-        
-        /* 禁用点击按钮时网页自带的半透明灰色遮罩 */
-        -webkit-tap-highlight-color: transparent;
-        
-        /* 禁用全局的文本选中，防止滑动时不小心选中文字，只允许输入框选中 */
-        -webkit-user-select: none;
-        user-select: none;
-      }
-
-      /* 允许输入框正常打字选中 */
-      input, textarea {
-        -webkit-user-select: auto;
-        user-select: auto;
-      }
-
-      ::-webkit-scrollbar { width: 4px; } /* 更加细长的原生滚动条 */
-      ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
-      
-      .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
-      .animate-slide-up { animation-fill-mode: both !important; }
+      body { background-color: #020617; color: #f8fafc; font-family: sans-serif; margin: 0; }
+      ::-webkit-scrollbar { width: 6px; }
+      ::-webkit-scrollbar-track { background: #0f172a; }
+      ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
     `}</style>
   );
 };
@@ -1257,21 +1231,17 @@ const App = () => {
     }
   }
 
-  // --- 动作 2: 完成任务 (Complete) ---
-  if (action === "complete") {
-    if (activeTaskId === taskId) setActiveTaskId(null); // 停止计时
-    updates.status = "Completed";
-    updates.endTime = new Date().toISOString();
-    
-    // 核心修复：完成时强制存档 
-    updates.duration = task.duration || 0; 
+ // --- 动作 2: 完成任务 (Complete) ---
+ if (action === "complete") {
+  if (activeTaskId === taskId) setActiveTaskId(null); // 停止计时
+  updates.status = "Completed";
+  updates.endTime = new Date().toISOString();
+  
+  updates.duration = task.duration || 0; 
 
-    // 🔴 修改点：只给悬赏(bounty)自动写入实际收益。
-    // 计时模式(stream)不再写入，保持其“预测”身份，交由卡片去实时计算。
-    if (!task.actualRevenue && task.mode === 'bounty') {
-       updates.actualRevenue = task.fixedReward || 0;
-    }
-  }
+  // 🚨 核心修复 3：完成任务时，不再自动写入 actualRevenue！
+  // 无论是计时还是悬赏，完成时一律保持“绿色的预测状态”，等你主动去点核算！
+}
 
   // --- 动作 3: 删除任务 ---
   if (action === "delete") {
@@ -1305,7 +1275,7 @@ const App = () => {
     updates.actualRevenue = payload === null ? null : Number(payload);
   }
 
-  /// --- 动作 6: 补录/调整时间 (智能联动：时间变了，钱也要变) ---
+  // --- 动作 6: 补录/调整时间 (调整时间时不破坏预测状态) ---
   if (action === "adjust") {
     const currentDuration = task.duration || 0;
     
@@ -1313,15 +1283,11 @@ const App = () => {
     const newDuration = currentDuration + Number(payload.addMinutes) * 60;
     updates.duration = newDuration;
 
-    // 2. 自动重算金额 (核心修复：补录时间后自动更新金额)
-    // 只有“计时付 (stream)”模式才自动算，悬赏模式 (bounty) 需要手动填追加金额
-    if (task.mode === 'stream') {
-        // 自动计算：新时长(小时) * 时薪
-        updates.actualRevenue = (newDuration / 3600) * task.hourlyRate;
-    } else {
-        // 悬赏模式：保持原有逻辑 (原有金额 + 追加金额)
+    // 🚨 核心修复 4：除非你在补录时间的同时追加了实打实的金额，否则不碰 actualRevenue！
+    if (Number(payload.addRevenue) > 0) {
         updates.actualRevenue = (task.actualRevenue || 0) + Number(payload.addRevenue);
     }
+    // （删除了自作聪明重算 actualRevenue 的逻辑，让卡片去实时预测）
     
     // 3. 状态处理
     if (payload.shouldStart) {
@@ -1370,101 +1336,98 @@ const App = () => {
   setAdjustTaskData({ id: task.id, addMinutes: 0, addRevenue: 0 });
   setShowAdjustModal(true);
 };
-  // 👇👇👇 替换原来的 addTask 函数 (RPG 逻辑升级版) 👇👇👇
-  const addTask = async (shouldStartImmediately = false) => {
-    if (!user) return;
 
-    // 1. 确定项目名称
-    const finalProject = isNewProject
-      ? newTask.customProject || "未命名项目"
-      : newTask.project || "默认项目";
+// 👇👇👇 替换原来的 addTask 函数 (彻底修复金额死锁，永远保持预测) 👇👇👇
+const addTask = async (shouldStartImmediately = false) => {
+  if (!user) return;
 
-    if (!newTask.title && !isManualEntry) return;
+  // 1. 确定项目名称
+  const finalProject = isNewProject
+    ? newTask.customProject || "未命名项目"
+    : newTask.project || "默认项目";
 
-    const id = Date.now().toString();
+  if (!newTask.title && !isManualEntry) return;
 
-    // 2. 确定时间 (补录 vs 实时)
-    let finalDate = new Date().toISOString();
-    if (isManualEntry && targetDate) {
-      finalDate = new Date(targetDate + "T12:00:00").toISOString();
-    }
+  const id = Date.now().toString();
 
-    // 3. 核心：计算 XP 倍率 (The Growth Multiplier)
-    let multiplier = 1.0;
-    if (newTask.xpType === "growth") multiplier = 2.0; // 进化 = 2倍经验
-    if (newTask.xpType === "maintenance") multiplier = 0.5; // 维持 = 0.5倍经验
+  // 2. 确定时间 (补录 vs 实时)
+  let finalDate = new Date().toISOString();
+  if (isManualEntry && targetDate) {
+    finalDate = new Date(targetDate + "T12:00:00").toISOString();
+  }
 
-    // 4. 构建任务数据包
-    let taskData = {
-      id,
-      title: newTask.title || "快速记录",
-      project: finalProject,
-      createdAt: finalDate,
+  // 3. 核心：计算 XP 倍率 (The Growth Multiplier)
+  let multiplier = 1.0;
+  if (newTask.xpType === "growth") multiplier = 2.0; // 进化 = 2倍经验
+  if (newTask.xpType === "maintenance") multiplier = 0.5; // 维持 = 0.5倍经验
 
-      // --- RPG 新属性 ---
-      mode: newTask.mode || "stream", // 'stream' (计时) or 'bounty' (悬赏)
-      xpType: newTask.xpType || "work", // 'growth', 'work', 'maintenance'
-      expMult: multiplier, // 存入倍率，方便后续计算
+  // 4. 构建任务数据包
+  let taskData = {
+    id,
+    title: newTask.title || "快速记录",
+    project: finalProject,
+    createdAt: finalDate,
 
-      // --- 金额逻辑 ---
-      // 如果是悬赏模式，金额是固定赏金；如果是计时模式，金额是时薪
-      hourlyRate: newTask.mode === "bounty" ? 0 : Number(newTask.estValue),
-      fixedReward: newTask.mode === "bounty" ? Number(newTask.estValue) : 0,
+    // --- RPG 新属性 ---
+    mode: newTask.mode || "stream", // 'stream' (计时) or 'bounty' (悬赏)
+    xpType: newTask.xpType || "work", // 'growth', 'work', 'maintenance'
+    expMult: multiplier, 
 
-      // --- 补录数据 ---
-      duration: Number(newTask.manualDurationMinutes) * 60,
-      actualRevenue: Number(newTask.manualRevenue), // 补录时直接填入的实际收益
-    };
+    hourlyRate: newTask.mode === "bounty" ? 0 : Number(newTask.estValue),
+    fixedReward: newTask.mode === "bounty" ? Number(newTask.estValue) : 0,
 
-    // 5. 状态流转
-    if (shouldStartImmediately) {
-      taskData.status = "In Progress";
-      setActiveTaskId(id);
-    } else if (isManualEntry) {
-      taskData.status = "Completed";
-      taskData.endTime = finalDate;
-
-      // 补录时的自动收益计算：
-      // 如果没填实际收益，但有赏金/时薪，尝试自动计算
-      if (!taskData.actualRevenue) {
-        if (taskData.mode === "bounty") {
-          taskData.actualRevenue = taskData.fixedReward;
-        } else {
-          // 补录时长(小时) * 时薪
-          taskData.actualRevenue =
-            (taskData.duration / 3600) * taskData.hourlyRate;
-        }
-      }
-    } else {
-      taskData.status = "Pending";
-    }
-
-    // 6. 保存到数据库
-    if (isLocalMode) {
-      setTasks((prev) => [taskData, ...prev]);
-    } else {
-      await setDoc(
-        doc(db, "artifacts", appId, "users", user.uid, "tasks", id),
-        taskData
-      );
-    }
-
-    // 7. 重置表单 (保留项目以便连续输入)
-    setNewTask({
-      title: "",
-      project: finalProject,
-      customProject: "",
-      estValue: 0,
-      manualDurationMinutes: 0,
-      manualRevenue: 0,
-      mode: "stream", // 重置为默认流式
-      xpType: "work", // 重置为默认搬砖
-    });
-    setShowAddModal(false);
-    setIsManualEntry(false);
-    setIsNewProject(false);
-    setTargetDate(null);
+    // --- 补录数据 ---
+    duration: Number(newTask.manualDurationMinutes) * 60,
+    
+    // 🚨 核心修复 1：新建时一律设为 null！强制它保持“绿色的预测状态”！
+    actualRevenue: null, 
   };
+
+  // 5. 状态流转
+  if (shouldStartImmediately) {
+    taskData.status = "In Progress";
+    setActiveTaskId(id);
+  } else if (isManualEntry) {
+    taskData.status = "Completed";
+    taskData.endTime = finalDate;
+
+    // 🚨 核心修复 2：只有当你在补录时，真真实实填了 > 0 的钱，它才会变成实际收益
+    const manualRev = Number(newTask.manualRevenue);
+    if (manualRev > 0) {
+        taskData.actualRevenue = manualRev;
+    }
+    // （完美删除了自动把预测变实际的逻辑，交由 UI 动态计算）
+  } else {
+    taskData.status = "Pending";
+  }
+
+  // 6. 保存到数据库
+  if (isLocalMode) {
+    setTasks((prev) => [taskData, ...prev]);
+  } else {
+    await setDoc(
+      doc(db, "artifacts", appId, "users", user.uid, "tasks", id),
+      taskData
+    );
+  }
+
+  // 7. 重置表单 (保留项目以便连续输入)
+  setNewTask({
+    title: "",
+    project: finalProject,
+    customProject: "",
+    estValue: 0,
+    manualDurationMinutes: 0,
+    manualRevenue: 0,
+    mode: "stream", 
+    xpType: "work", 
+  });
+  setShowAddModal(false);
+  setIsManualEntry(false);
+  setIsNewProject(false);
+  setTargetDate(null);
+};
+
   // 👇👇👇 这是新加的函数，专门处理日历点击 👇👇👇
   const handleCalendarDateSelect = (dateStr, dayData) => {
     const todayStr = new Date().toISOString().split("T")[0];
