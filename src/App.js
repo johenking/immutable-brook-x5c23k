@@ -776,18 +776,20 @@ const SwipeableTaskCard = ({
   // 渲染逻辑 (Render)
   // ==============================
 
+  // ====== 🔴 4.1 新的算账逻辑：严格区分“预测”和“实际” ======
   const isBounty = task.mode === "bounty";
   const xpType = task.xpType || "work";
   const currentXP = Math.floor(((task.duration || 0) / 60) * (task.expMult || 1));
   
-  let displayMoney = 0;
-  if (task.actualRevenue) {
-    displayMoney = task.actualRevenue;
-  } else if (isBounty) {
-    displayMoney = isCompleted ? task.fixedReward : 0;
-  } else {
-    displayMoney = ((task.duration || 0) / 3600) * (task.hourlyRate || 0);
-  }
+  // 1. 先死算出一个“预测收益” (时长 * 时薪，或者悬赏金)
+  const predictedMoney = isBounty ? (task.fixedReward || 0) : ((task.duration || 0) / 3600) * (task.hourlyRate || 0);
+  
+  // 2. 核心判断：数据库里到底有没有你手动核算过的“实际收益”？
+  // 注意：必须用 != null，因为如果你核算了 0 元，它也是有效的实际收益！
+  const hasActualRevenue = task.actualRevenue != null;
+  
+  // 3. 决定最终显示多少钱：有实际就用实际，没实际就用预测
+  const displayMoney = hasActualRevenue ? task.actualRevenue : predictedMoney;
 
   const showDebtWarning = isCompleted && isTimeDebt;
   const dateObj = task.createdAt ? new Date(task.createdAt) : new Date();
@@ -861,7 +863,20 @@ const SwipeableTaskCard = ({
             <div className="shrink-0 px-2 py-1.5 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-mono flex items-center gap-1 font-bold">
               <Zap size={12} fill="currentColor" /> {currentXP}
             </div>
-            <div className={`px-2 py-1.5 rounded-md border text-xs font-mono font-bold flex items-center gap-1 truncate max-w-[110px] ${showDebtWarning ? "text-rose-400 border-rose-500/30 bg-rose-500/5" : "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"}`}>
+            {/* ====== 🔴 4.2 新的金额胶囊：动态变色 + 徽章 ====== */}
+            <div className={`px-2 py-1.5 rounded-md border text-xs font-mono font-bold flex items-center gap-1 truncate max-w-[110px] transition-all duration-300 ${
+                showDebtWarning 
+                ? "text-rose-400 border-rose-500/30 bg-rose-500/5" : // 🚨 负债警告：暗红色
+                hasActualRevenue 
+                ? "text-amber-400 border-amber-500/50 bg-amber-500/10 shadow-[0_0_10px_rgba(245,158,11,0.15)]" : // 🌟 实际收益：金色高亮发光
+                "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" // 🌿 预测收益：默认绿色
+            }`}>
+               {/* 只有在手动核算后 (hasActualRevenue 为 true)，才显示这个 [实] 字小徽章 */}
+               {hasActualRevenue && (
+                  <span className="text-[9px] bg-amber-500/20 px-1 rounded-sm mr-0.5 font-sans leading-none pb-px text-amber-500 border border-amber-500/20">
+                     实
+                  </span>
+               )}
                ¥ {Number(displayMoney).toFixed(2)}
             </div>
           </div>
@@ -1217,16 +1232,13 @@ const App = () => {
     updates.status = "Completed";
     updates.endTime = new Date().toISOString();
     
-    // 🚨🚨🚨 核心修复：完成时强制存档 🚨🚨🚨
+    // 核心修复：完成时强制存档 
     updates.duration = task.duration || 0; 
 
-    // 自动结算金币
-    if (!task.actualRevenue) {
-       if (task.mode === 'bounty') {
-          updates.actualRevenue = task.fixedReward || 0;
-       } else if (task.hourlyRate > 0 && (task.duration || 0) > 0) {
-          updates.actualRevenue = ((task.duration / 3600) * task.hourlyRate);
-       }
+    // 🔴 修改点：只给悬赏(bounty)自动写入实际收益。
+    // 计时模式(stream)不再写入，保持其“预测”身份，交由卡片去实时计算。
+    if (!task.actualRevenue && task.mode === 'bounty') {
+       updates.actualRevenue = task.fixedReward || 0;
     }
   }
 
@@ -1256,9 +1268,10 @@ const App = () => {
     // 2. 重新激活全局计时器
     setActiveTaskId(taskId); 
   }
-  // --- 动作 5: 手动修改金额 ---
+  // --- 动作 5: 手动核算金额 ---
   if (action === "revenue") {
-    updates.actualRevenue = Number(revenueInput);
+    // 🔴 修改点：读取 payload 而不是 revenueInput。支持接收 null 以便“撤回”核算
+    updates.actualRevenue = payload === null ? null : Number(payload);
   }
 
   /// --- 动作 6: 补录/调整时间 (智能联动：时间变了，钱也要变) ---
@@ -1298,15 +1311,26 @@ const App = () => {
       );
     }
   }
-};
-  // 新增：处理验算逻辑 (简单的弹窗输入，你也可以换成复杂的 Modal)
+  // 🔴 终极修复：处理验算逻辑 (修复长小数，支持清空撤回)
   const handleRevenueEdit = (task) => {
     setEditRevenueId(task.id);
-    setRevenueInput(task.actualRevenue || 0);
-    // 这里弹出一个 prompt 或者使用 modal，为了简单直接用 prompt 演示，或者复用 adjust modal
-    const newVal = prompt("修正金额 (¥):", task.actualRevenue || 0);
-    if(newVal !== null) {
-        handleTaskAction("revenue", task.id, newVal);
+    
+    // 先计算出当前的预测金额
+    const predicted = ((task.duration || 0) / 3600) * (task.hourlyRate || 0);
+    // 如果有实际金额用实际，否则用预测
+    const current = task.actualRevenue != null ? task.actualRevenue : predicted;
+    
+    // 弹出输入框，并使用 .toFixed(2) 保证不会出现 35.41666666 这种数字
+    const newVal = prompt("核算实际收益 (¥):\n如果不准，请修改；如果留空并确认，将自动撤销并恢复为预测收益。", Number(current).toFixed(2));
+    
+    if (newVal !== null) {
+        if (newVal.trim() === "") {
+            // 留空代表撤销实际收益，恢复为系统预测
+            handleTaskAction("revenue", task.id, null);
+        } else {
+            // 输入了新数字，确认为实际收益
+            handleTaskAction("revenue", task.id, Number(newVal));
+        }
     }
 };
   const handleTimeClick = (task) => {
@@ -1555,7 +1579,7 @@ const App = () => {
       <StyleLoader />
       {/* 👇👇👇 新的 RPG 玩家状态栏 & 账号菜单 👇👇👇 */}
       <div className="sticky top-0 z-40 bg-[#020617]/90 backdrop-blur-xl border-b border-white/5 px-4 py-3 shadow-lg">
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center relative">
           {/* 左侧：玩家状态 HUD */}
           <div className="flex items-center gap-3 flex-1">
             {/* 头像/等级徽章 */}
@@ -2515,8 +2539,8 @@ const App = () => {
                   {reportData.tasks.reduce(
                     (acc, t) => acc + (t.actualRevenue || 0),
                     0
-                  ).toFixed(2)
-                  }
+                    .toFixed(2)
+                  )}
                 </div>
               </div>
             </div>
