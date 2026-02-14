@@ -1058,7 +1058,9 @@ const App = () => {
   const [tasks, setTasks] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [activeTaskId, setActiveTaskId] = useState(null);
-
+  const [globalDate, setGlobalDate] = useState(
+    new Date().toISOString().split("T")[0]
+  );
   // Modals & Views
   const [showAddModal, setShowAddModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
@@ -1253,35 +1255,70 @@ const App = () => {
     return () => clearInterval(interval);
   }, [activeTaskId]);
 
-  // --- Stats (分离实际与预测) ---
+  // --- Stats (终极版：分离“当日聚焦”与“终生资产”) ---
   const stats = useMemo(() => {
-    const completed = tasks.filter((t) => t.status === "Completed");
-    const totalDurationHrs =
+    // 1. 筛选出属于“游标指定日”的任务
+    const dailyTasks = tasks.filter((t) => {
+      const tDate = t.endTime
+        ? t.endTime.split("T")[0]
+        : t.createdAt.split("T")[0];
+      return tDate === globalDate;
+    });
+
+    // ==========================================
+    // A. 计算【当日】数据 (供给作战面板使用)
+    // ==========================================
+    const dailyDurationHrs =
+      dailyTasks.reduce((acc, t) => acc + (t.duration || 0), 0) / 3600;
+    let dailyActualRev = 0;
+    let dailyPredictedRev = 0;
+
+    dailyTasks.forEach((t) => {
+      if (t.status === "Completed") {
+        if (t.actualRevenue != null) {
+          dailyActualRev += Number(t.actualRevenue);
+        } else {
+          const isBounty = t.mode === "bounty";
+          const p = isBounty
+            ? t.fixedReward || 0
+            : ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
+          dailyPredictedRev += p;
+        }
+      }
+    });
+
+    const dailyTotalRev = dailyActualRev + dailyPredictedRev;
+    const dailyROI =
+      dailyDurationHrs > 0 ? dailyTotalRev / dailyDurationHrs : 0;
+    const dailyDebtTasks = dailyTasks.filter((t) => {
+      const hrs = (t.duration || 0) / 3600;
+      return (
+        t.status === "Completed" &&
+        hrs > 0 &&
+        (t.actualRevenue || 0) / hrs < HOURLY_THRESHOLD
+      );
+    }).length;
+
+    // ==========================================
+    // B. 计算【终生】数据 (供给RPG等级和资产页使用)
+    // ==========================================
+    const lifetimeDurationHrs =
       tasks.reduce((acc, t) => acc + (t.duration || 0), 0) / 3600;
+    const completedTasks = tasks.filter((t) => t.status === "Completed");
+    let lifetimeActualRev = 0;
+    let lifetimePredictedRev = 0;
 
-    // 🔴 1. 拆分：实际已核算的钱 vs 尚未核算的预测钱
-    let actualRev = 0;
-    let predictedRev = 0;
-
-    completed.forEach((t) => {
+    completedTasks.forEach((t) => {
       if (t.actualRevenue != null) {
-        actualRev += Number(t.actualRevenue);
+        lifetimeActualRev += Number(t.actualRevenue);
       } else {
         const isBounty = t.mode === "bounty";
         const p = isBounty
           ? t.fixedReward || 0
           : ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
-        predictedRev += p;
+        lifetimePredictedRev += p;
       }
     });
-
-    const totalRevenue = actualRev + predictedRev; // ROI 计算仍然用总钱数
-    const avgROI = totalDurationHrs > 0 ? totalRevenue / totalDurationHrs : 0;
-
-    const timeDebtTasks = completed.filter((t) => {
-      const hrs = (t.duration || 0) / 3600;
-      return hrs > 0 && (t.actualRevenue || 0) / hrs < HOURLY_THRESHOLD;
-    }).length;
 
     const recentReviews = reviews.slice(0, 7);
     const avgAgency =
@@ -1292,23 +1329,31 @@ const App = () => {
           ).toFixed(1)
         : 0;
 
-    // 🔴 2. 导出新变量
+    // 🔴 导出两份数据
     return {
-      totalDurationHrs,
-      totalRevenue,
-      actualRev,
-      predictedRev,
-      avgROI,
-      timeDebtTasks,
+      daily: {
+        durationHrs: dailyDurationHrs,
+        actualRev: dailyActualRev,
+        predictedRev: dailyPredictedRev,
+        totalRev: dailyTotalRev,
+        avgROI: dailyROI,
+        debtTasks: dailyDebtTasks,
+      },
+      lifetime: {
+        durationHrs: lifetimeDurationHrs,
+        actualRev: lifetimeActualRev,
+        predictedRev: lifetimePredictedRev,
+        totalRev: lifetimeActualRev + lifetimePredictedRev,
+      },
       avgAgency,
     };
-  }, [tasks, reviews]);
+  }, [tasks, reviews, globalDate]); // 👈 记得依赖项里加上 globalDate
   // 👇👇👇 补上这段缺失的逻辑，白屏立刻就好 👇👇👇
   const [showUserMenu, setShowUserMenu] = useState(false); // 1. 控制菜单开关
 
   const playerStats = useMemo(() => {
     // 2. 计算 RPG 等级
-    const totalXP = Math.floor(stats.totalDurationHrs * 60);
+    const totalXP = Math.floor(stats.lifetime.durationHrs * 60);
     const level = Math.floor(totalXP / 1000) + 1;
     const currentLevelXP = totalXP % 1000;
     const nextLevelXP = 1000;
@@ -2028,21 +2073,31 @@ const App = () => {
             <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none group-hover:opacity-10 transition-opacity duration-500">
               <Activity size={120} />
             </div>
+            {/* ====== 顶部标题与操作栏 ====== */}
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 relative z-10 gap-4">
-              {/* 标题区域 */}
+              {/* 标题区域：加入日期游标指示器 */}
               <div>
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                  <LayoutDashboard className="text-blue-500" size={20} />{" "}
-                  <span className="truncate tracking-tight">ROI</span>
+                  <LayoutDashboard className="text-blue-500" size={20} />
+                  <span className="tracking-tight">作战看板</span>
+
+                  {/* 🔴 这里就是新增的炫酷日期游标徽章 */}
+                  <div className="ml-2 px-2 py-0.5 rounded-md bg-blue-500/20 border border-blue-500/30 flex items-center gap-1.5 shadow-[0_0_10px_rgba(59,130,246,0.2)] transition-all">
+                    <CalendarIcon size={12} className="text-blue-400" />
+                    <span className="text-[11px] font-mono font-bold text-blue-300 tracking-wider">
+                      {globalDate === new Date().toISOString().split("T")[0]
+                        ? "今日实时"
+                        : globalDate}
+                    </span>
+                  </div>
                 </h2>
                 <p className="text-slate-400 text-sm mt-1">
                   "像经营公司一样经营你的人生。"
                 </p>
               </div>
 
-              {/* 按钮控制区域 */}
+              {/* 按钮控制区域 (保留了你原来的按钮) */}
               <div className="flex items-center justify-between md:justify-end gap-2 w-full md:w-auto">
-                {/* 列表/日历 切换器 */}
                 <div className="flex bg-black/40 p-1 rounded-xl border border-white/10">
                   <button
                     onClick={() => setTaskViewMode("list")}
@@ -2066,10 +2121,9 @@ const App = () => {
                   </button>
                 </div>
 
-                {/* 新项目按钮 - 手机端只显示图标，PC端显示文字 */}
                 <button
                   onClick={() => {
-                    setTargetDate(null); // 🟢 [新增] 强制清空补录日期，确保是“新建今天”
+                    setTargetDate(null);
                     setIsManualEntry(false);
                     setShowAddModal(true);
                   }}
@@ -2081,51 +2135,63 @@ const App = () => {
               </div>
             </div>
 
-            {/* 🔴 重新编排的 4 个数据看板 */}
+            {/* ====== 🔴 核心数据面板 (全面切换为 stats.daily 单日聚焦) ====== */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 relative z-10">
               <StatBox
-                label="真实时薪 (ROI)"
-                prefix="¥" // 👈 把符号单独拆出来
-                value={stats.avgROI.toFixed(0)} // 👈 这里只传纯数字
+                label="单日时薪 (ROI)"
+                prefix="¥"
+                value={stats.daily.avgROI.toFixed(0)}
                 unit="/h"
                 color={
-                  stats.avgROI < HOURLY_THRESHOLD
+                  stats.daily.avgROI < HOURLY_THRESHOLD &&
+                  stats.daily.durationHrs > 0
                     ? "text-rose-400 drop-shadow-[0_0_10px_rgba(244,63,94,0.3)]"
                     : "text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.3)]"
                 }
                 icon={<TrendingUp size={14} />}
                 onClick={() => setSelectedStat("roi")}
               />
+
               <StatBox
-                label="累计营收 (落袋)"
+                label="单日营收 (落袋)"
                 prefix="¥"
-                value={stats.actualRev.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                value={stats.daily.actualRev.toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
                 unit=""
                 color="text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)]"
                 icon={<DollarSign size={14} />}
                 onClick={() => setSelectedStat("revenue")}
                 subNode={
                   <div className="text-[10px] text-emerald-400 font-mono font-bold flex items-center gap-1 bg-emerald-500/10 w-fit px-1.5 py-0.5 rounded border border-emerald-500/20">
-                    +¥{stats.predictedRev.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 预测
+                    +¥
+                    {stats.daily.predictedRev.toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{" "}
+                    预测
                   </div>
                 }
               />
+
               <StatBox
-                label="总投入时长"
+                label="单日投入时长"
                 prefix=""
-                value={stats.totalDurationHrs.toFixed(1)}
+                value={stats.daily.durationHrs.toFixed(1)}
                 unit="h"
                 color="text-blue-400 drop-shadow-[0_0_10px_rgba(59,130,246,0.3)]"
                 icon={<Clock size={14} />}
                 onClick={() => setSelectedStat("duration")}
               />
+
               <StatBox
-                label="时间负债"
+                label="单日时间负债"
                 prefix=""
-                value={stats.timeDebtTasks}
+                value={stats.daily.debtTasks}
                 unit="个"
                 color={
-                  stats.timeDebtTasks > 0
+                  stats.daily.debtTasks > 0
                     ? "text-rose-400 drop-shadow-[0_0_10px_rgba(244,63,94,0.3)]"
                     : "text-slate-400"
                 }
