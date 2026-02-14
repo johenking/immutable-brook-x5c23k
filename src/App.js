@@ -474,8 +474,10 @@ const AuditItem = ({ type, val, setVal, note, setNote }) => {
 };
 
 // --- Calendar ---
+// --- Calendar (终极可视化热力图版) ---
 const CalendarView = ({ type, data, onSelectDate }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
+
   const daysInMonth = new Date(
     currentDate.getFullYear(),
     currentDate.getMonth() + 1,
@@ -486,6 +488,7 @@ const CalendarView = ({ type, data, onSelectDate }) => {
     currentDate.getMonth(),
     1
   ).getDay();
+
   const handlePrev = () =>
     setCurrentDate(
       new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1)
@@ -516,76 +519,91 @@ const CalendarView = ({ type, data, onSelectDate }) => {
         0
       );
 
-      // 👇👇👇 [新增] 计算当天总营收 👇👇👇
-      const totalRevenue = tasksForDay.reduce(
-        (acc, t) => acc + (Number(t.actualRevenue) || 0),
-        0
-      );
+      // 🚨 核心修复：日历必须把“实际”和“预测”加在一起算，防止数据归零隐形
+      const totalRevenue = tasksForDay.reduce((acc, t) => {
+        if (t.actualRevenue != null) return acc + Number(t.actualRevenue);
+        const isBounty = t.mode === "bounty";
+        return (
+          acc +
+          (isBounty
+            ? t.fixedReward || 0
+            : ((t.duration || 0) / 3600) * (t.hourlyRate || 0))
+        );
+      }, 0);
 
       return {
         count: tasksForDay.length,
         duration: totalSeconds,
-        totalRevenue, // 👈 记得把这个新算出来的钱返回出去
+        totalRevenue,
         tasks: tasksForDay,
       };
     }
   };
 
-  const getScoreColor = (item) => {
-    if (!item) return "bg-slate-800 border-slate-700 text-slate-600";
-    if (type === "review") {
-      const avg =
-        (Number(item.bioEnergy) +
-          Number(item.agency) +
-          Number(item.connection) +
-          Number(item.flow) +
-          Number(item.awe)) /
-        5;
-      if (avg >= 8)
-        return "bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.3)]";
-      if (avg >= 5) return "bg-amber-500/20 border-amber-500 text-amber-400";
-      return "bg-rose-500/20 border-rose-500 text-rose-400";
-    } else {
-      const hours = item.duration / 3600;
-      if (hours >= 6)
-        return "bg-blue-500/40 border-blue-400 text-white shadow-[0_0_10px_rgba(59,130,246,0.4)] font-bold";
-      if (hours >= 3) return "bg-blue-600/20 border-blue-500/50 text-blue-200";
-      return "bg-slate-700/50 border-slate-600 text-slate-400";
-    }
+  // 审计日历颜色
+  const getReviewScoreColor = (item) => {
+    if (!item) return "bg-[#0f172a]/50 border-slate-800 text-slate-600";
+    const avg =
+      (Number(item.bioEnergy) +
+        Number(item.agency) +
+        Number(item.connection) +
+        Number(item.flow) +
+        Number(item.awe)) /
+      5;
+    if (avg >= 8)
+      return "bg-emerald-500/20 border-emerald-500/50 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]";
+    if (avg >= 5) return "bg-amber-500/20 border-amber-500/50 text-amber-400";
+    return "bg-rose-500/20 border-rose-500/50 text-rose-400";
+  };
+
+  // 🔴 核心视觉升级：工作日历阶梯热力图 (GitHub Style)
+  const getTaskScoreColor = (hours) => {
+    if (!hours || hours === 0)
+      return "bg-[#0f172a]/50 border-slate-800/50 text-slate-600";
+    if (hours >= 8)
+      return "bg-blue-600 border-blue-400 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]"; // 满负荷发光
+    if (hours >= 5) return "bg-blue-500/60 border-blue-400/60 text-white"; // 深度工作
+    if (hours >= 2) return "bg-blue-500/30 border-blue-500/40 text-blue-100"; // 正常
+    return "bg-blue-900/30 border-blue-800/40 text-blue-300"; // 碎片时间
   };
 
   return (
     <div className="animate-fade-in">
+      {/* 头部控制栏 */}
       <div className="flex justify-between items-center mb-4 px-2">
         <button
           onClick={handlePrev}
-          className="p-1 hover:bg-slate-800 rounded-lg text-slate-400"
+          className="p-1.5 hover:bg-white/5 rounded-xl text-slate-400 hover:text-white transition-colors"
         >
           <ChevronLeft size={20} />
         </button>
-        <h3 className="font-bold text-white">
-          {currentDate.toLocaleString("default", {
-            month: "long",
-            year: "numeric",
-          })}
+        <h3 className="font-bold text-white font-mono tracking-wider">
+          {currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月
         </h3>
         <button
           onClick={handleNext}
-          className="p-1 hover:bg-slate-800 rounded-lg text-slate-400"
+          className="p-1.5 hover:bg-white/5 rounded-xl text-slate-400 hover:text-white transition-colors"
         >
           <ChevronRight size={20} />
         </button>
       </div>
+
+      {/* 星期表头 */}
       <div className="grid grid-cols-7 gap-2 mb-2 text-center">
         {["S", "M", "T", "W", "T", "F", "S"].map((d) => (
-          <span key={d} className="text-[10px] text-slate-500 font-bold">
+          <span
+            key={d}
+            className="text-[10px] text-slate-500 font-bold uppercase"
+          >
             {d}
           </span>
         ))}
       </div>
+
+      {/* 日历网格 */}
       <div className="grid grid-cols-7 gap-2">
         {Array.from({ length: firstDay }).map((_, i) => (
-          <div key={`empty-${i}`} className="h-14"></div>
+          <div key={`empty-${i}`} className="h-16"></div>
         ))}
         {Array.from({ length: daysInMonth }).map((_, i) => {
           const day = i + 1;
@@ -597,6 +615,19 @@ const CalendarView = ({ type, data, onSelectDate }) => {
               currentDate.getMonth(),
               day
             ).toDateString();
+
+          const hours = item ? item.duration / 3600 : 0;
+          const colorClass =
+            type === "review"
+              ? getReviewScoreColor(item)
+              : getTaskScoreColor(hours);
+
+          // 🔴 核心视觉：内部注水进度条 (假设 8 小时为 100% 满状态)
+          const fillHeight =
+            type === "task" && item
+              ? `${Math.min((hours / 8) * 100, 100)}%`
+              : "0%";
+
           return (
             <div
               key={day}
@@ -610,58 +641,68 @@ const CalendarView = ({ type, data, onSelectDate }) => {
                   item
                 );
               }}
-              className={`h-14 rounded-xl border flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-105 active:scale-95 relative ${getScoreColor(
-                item
-              )} ${isToday ? "ring-2 ring-white z-10" : ""}`}
+              className={`relative h-16 rounded-[14px] border overflow-hidden flex flex-col items-center justify-center cursor-pointer transition-all duration-300 hover:scale-[1.05] active:scale-95 ${colorClass} ${
+                isToday ? "ring-2 ring-white z-20" : ""
+              }`}
             >
-              <span className="text-xs font-bold text-slate-500">{day}</span>
-
-              {/* 👇👇👇 新增：显示金额逻辑 👇👇👇 */}
+              {/* 视觉水杯底底色 */}
               {type === "task" && item && (
-                <div className="flex flex-col items-center mt-0.5">
-                  {/* 如果有钱，显示绿色金额 */}
-                  {item.totalRevenue > 0 ? (
-                    <span className="text-[9px] font-mono font-bold text-emerald-400">
-                      {/* 🔴 修复：日历格子空间小，强制取整 (toFixed(0)) */}
-                      ¥{Number(item.totalRevenue).toFixed(0)}
-                    </span>
-                  ) : (
-                    // 如果没钱只有时间，显示个小横杠或者时长
-                    <span className="text-[9px] font-mono text-slate-600">
-                      {(item.duration / 3600).toFixed(1)}h
-                    </span>
-                  )}
+                <div
+                  className="absolute bottom-0 left-0 w-full bg-blue-400/20 transition-all duration-500 ease-out"
+                  style={{ height: fillHeight }}
+                ></div>
+              )}
+
+              <span className="relative z-10 text-[11px] font-bold mb-0.5">
+                {day}
+              </span>
+
+              {/* 修复后的数据展示：金钱和时间优雅堆叠 */}
+              {type === "task" && item && (
+                <div className="relative z-10 flex flex-col items-center">
+                  <span className="text-[9px] font-mono font-bold text-emerald-400 leading-none shadow-black/50 drop-shadow-md">
+                    ¥{item.totalRevenue.toFixed(0)}
+                  </span>
+                  <span className="text-[8px] font-mono text-white/70 font-bold leading-none mt-1">
+                    {hours.toFixed(1)}h
+                  </span>
                 </div>
               )}
             </div>
           );
         })}
       </div>
-      <div className="flex justify-center gap-4 mt-4 text-[10px] text-slate-500">
+
+      {/* 底部图例说明 */}
+      <div className="flex justify-center gap-3 mt-6 text-[9px] text-slate-400 font-bold uppercase tracking-wider">
         {type === "review" ? (
           <>
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-emerald-500"></div> 巅峰
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-sm bg-emerald-500/50 border border-emerald-500"></div>{" "}
+              巅峰
             </div>
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-amber-500"></div> 平常
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-sm bg-amber-500/50 border border-amber-500"></div>{" "}
+              平常
             </div>
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-rose-500"></div> 低谷
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-sm bg-rose-500/50 border border-rose-500"></div>{" "}
+              低谷
             </div>
           </>
         ) : (
           <>
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-blue-500"></div> 深度 (
-              {">"}6h)
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-sm bg-blue-600 shadow-[0_0_5px_rgba(37,99,235,0.8)] border border-blue-400"></div>{" "}
+              极度专注 (≥8h)
             </div>
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-blue-900 border border-blue-700"></div>{" "}
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-sm bg-blue-500/60 border border-blue-400/60"></div>{" "}
+              深度 (≥5h)
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-sm bg-blue-500/30 border border-blue-500/40"></div>{" "}
               正常
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-slate-700"></div> 休息
             </div>
           </>
         )}
@@ -684,7 +725,7 @@ const SwipeableTaskCard = ({
 }) => {
   const [offsetX, setOffsetX] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
-  
+
   // 核心引用
   const startX = useRef(0);
   const startY = useRef(0);
@@ -695,7 +736,7 @@ const SwipeableTaskCard = ({
   // ==============================
   // 统一的滑动处理逻辑 (Core Logic)
   // ==============================
-  
+
   const handleStart = (clientX, clientY) => {
     setIsAnimating(false);
     startX.current = clientX;
@@ -714,8 +755,8 @@ const SwipeableTaskCard = ({
 
     // 方向锁判定 (仅第一次移动时判定)
     if (Math.abs(diffY) > Math.abs(diffX) && Math.abs(diffY) > 5) {
-        isVerticalScroll.current = true;
-        return;
+      isVerticalScroll.current = true;
+      return;
     }
 
     // 计算新位置
@@ -723,11 +764,11 @@ const SwipeableTaskCard = ({
 
     // 阻尼效果
     if (newOffset < -80) {
-        newOffset = -80 + (newOffset + 80) * 0.2; 
+      newOffset = -80 + (newOffset + 80) * 0.2;
     } else if (newOffset > 0) {
-        newOffset = newOffset * 0.2;
+      newOffset = newOffset * 0.2;
     }
-    
+
     setOffsetX(newOffset);
   };
 
@@ -735,12 +776,12 @@ const SwipeableTaskCard = ({
     if (!isDragging.current) return;
     isDragging.current = false;
     setIsAnimating(true);
-    
+
     // 吸附逻辑
     if (offsetX < -40) {
-        setOffsetX(-80);
+      setOffsetX(-80);
     } else {
-        setOffsetX(0);
+      setOffsetX(0);
     }
   };
 
@@ -754,20 +795,22 @@ const SwipeableTaskCard = ({
   // ==============================
 
   // Touch Events (手机端)
-  const onTouchStart = (e) => handleStart(e.touches[0].clientX, e.touches[0].clientY);
-  const onTouchMove = (e) => handleMove(e.touches[0].clientX, e.touches[0].clientY);
+  const onTouchStart = (e) =>
+    handleStart(e.touches[0].clientX, e.touches[0].clientY);
+  const onTouchMove = (e) =>
+    handleMove(e.touches[0].clientX, e.touches[0].clientY);
   const onTouchEnd = () => handleEnd();
 
   // Mouse Events (电脑端) 🔴 新增
   const onMouseDown = (e) => {
-      // 只有左键点击才触发拖拽
-      if (e.button !== 0) return;
-      handleStart(e.clientX, e.clientY);
+    // 只有左键点击才触发拖拽
+    if (e.button !== 0) return;
+    handleStart(e.clientX, e.clientY);
   };
   const onMouseMove = (e) => {
-      // 阻止默认文本选择行为，让拖拽更丝滑
-      if (isDragging.current) e.preventDefault(); 
-      handleMove(e.clientX, e.clientY);
+    // 阻止默认文本选择行为，让拖拽更丝滑
+    if (isDragging.current) e.preventDefault();
+    handleMove(e.clientX, e.clientY);
   };
   const onMouseUp = () => handleEnd();
   const onMouseLeave = () => handleEnd(); // 鼠标移出卡片范围也算结束
@@ -779,44 +822,70 @@ const SwipeableTaskCard = ({
   // ====== 🔴 4.1 新的算账逻辑：严格区分“预测”和“实际” ======
   const isBounty = task.mode === "bounty";
   const xpType = task.xpType || "work";
-  const currentXP = Math.floor(((task.duration || 0) / 60) * (task.expMult || 1));
-  
+  const currentXP = Math.floor(
+    ((task.duration || 0) / 60) * (task.expMult || 1)
+  );
+
   // 1. 先死算出一个“预测收益” (时长 * 时薪，或者悬赏金)
-  const predictedMoney = isBounty ? (task.fixedReward || 0) : ((task.duration || 0) / 3600) * (task.hourlyRate || 0);
-  
+  const predictedMoney = isBounty
+    ? task.fixedReward || 0
+    : ((task.duration || 0) / 3600) * (task.hourlyRate || 0);
+
   // 2. 核心判断：数据库里到底有没有你手动核算过的“实际收益”？
   // 注意：必须用 != null，因为如果你核算了 0 元，它也是有效的实际收益！
   const hasActualRevenue = task.actualRevenue != null;
-  
+
   // 3. 决定最终显示多少钱：有实际就用实际，没实际就用预测
   const displayMoney = hasActualRevenue ? task.actualRevenue : predictedMoney;
 
   const showDebtWarning = isCompleted && isTimeDebt;
   const dateObj = task.createdAt ? new Date(task.createdAt) : new Date();
-  const dateStr = dateObj.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }).replace('/', '-');
+  const dateStr = dateObj
+    .toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })
+    .replace("/", "-");
 
   return (
-    <div 
+    <div
       className="relative h-36 w-full mb-3 select-none isolate"
-      style={{ touchAction: 'pan-y' }}
+      style={{ touchAction: "pan-y" }}
     >
       {/* 背景层 */}
-      <div className={`absolute inset-0 bg-rose-600 flex items-center justify-end pr-8 rounded-2xl z-0 transition-opacity duration-200 ${offsetX < -2 ? 'opacity-100' : 'opacity-0'}`}>
-        <button onClick={(e) => { e.stopPropagation(); handleTaskAction("delete", task.id); }} className="flex flex-col items-center text-white font-bold gap-1 scale-110">
-          <Trash2 size={20} /><span className="text-[10px]">删除</span>
+      <div
+        className={`absolute inset-0 bg-rose-600 flex items-center justify-end pr-8 rounded-2xl z-0 transition-opacity duration-200 ${
+          offsetX < -2 ? "opacity-100" : "opacity-0"
+        }`}
+      >
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleTaskAction("delete", task.id);
+          }}
+          className="flex flex-col items-center text-white font-bold gap-1 scale-110"
+        >
+          <Trash2 size={20} />
+          <span className="text-[10px]">删除</span>
         </button>
       </div>
 
       {/* 前景层 */}
       <div
         className={`absolute inset-0 z-10 rounded-2xl flex flex-col border overflow-hidden px-5 py-4
-          ${isAnimating ? "transition-transform duration-500 cubic-bezier(0.18, 0.89, 0.32, 1.28)" : ""} 
-          ${isActive ? "bg-[#1e293b] border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]" : showDebtWarning ? "bg-[#1e293b] border-rose-500/50" : "bg-[#1e293b] border-white/5"}
+          ${
+            isAnimating
+              ? "transition-transform duration-500 cubic-bezier(0.18, 0.89, 0.32, 1.28)"
+              : ""
+          } 
+          ${
+            isActive
+              ? "bg-[#1e293b] border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]"
+              : showDebtWarning
+              ? "bg-[#1e293b] border-rose-500/50"
+              : "bg-[#1e293b] border-white/5"
+          }
           ${isDragging.current ? "cursor-grabbing" : "cursor-grab"} 
         `}
         // 样式：增加 cursor-grab 提示电脑用户这里可以拖动
         style={{ transform: `translateX(${offsetX}px)` }}
-        
         // 绑定所有事件
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
@@ -825,73 +894,155 @@ const SwipeableTaskCard = ({
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseLeave}
-
         onClick={(e) => {
-            if (Math.abs(offsetX) > 5) {
-                e.preventDefault();
-                e.stopPropagation();
-                resetSwipe();
-            }
+          if (Math.abs(offsetX) > 5) {
+            e.preventDefault();
+            e.stopPropagation();
+            resetSwipe();
+          }
         }}
       >
         {/* 顶部 */}
         <div className="flex justify-between items-center mb-1">
-            <div className="flex items-center gap-2">
-              {xpType === "growth" && <span className="text-[9px] font-bold bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded border border-purple-500/30">进化</span>}
-              {xpType === "maintenance" && <span className="text-[9px] font-bold bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30">维持</span>}
-              {isBounty && <span className="text-[9px] font-bold bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">悬赏</span>}
-              {!xpType && !isBounty && <span className="text-[9px] font-bold bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/30">搬砖</span>}
-            </div>
-            <span className="text-[10px] font-mono text-slate-500/60 font-bold tracking-wider">{dateStr}</span>
+          <div className="flex items-center gap-2">
+            {xpType === "growth" && (
+              <span className="text-[9px] font-bold bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded border border-purple-500/30">
+                进化
+              </span>
+            )}
+            {xpType === "maintenance" && (
+              <span className="text-[9px] font-bold bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                维持
+              </span>
+            )}
+            {isBounty && (
+              <span className="text-[9px] font-bold bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">
+                悬赏
+              </span>
+            )}
+            {!xpType && !isBounty && (
+              <span className="text-[9px] font-bold bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/30">
+                搬砖
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] font-mono text-slate-500/60 font-bold tracking-wider">
+            {dateStr}
+          </span>
         </div>
 
         <div className="flex justify-between items-center mb-auto pt-1">
-            <h4 className={`font-bold text-base truncate pr-3 ${isCompleted ? "text-slate-500 line-through" : "text-slate-100"}`}>{task.title}</h4>
-            <div 
-               onClick={(e) => { e.stopPropagation(); onTimeClick(task); }} 
-               className={`shrink-0 px-2 py-1 rounded-lg border flex items-center justify-center cursor-pointer hover:bg-white/5 active:scale-95 transition-all ${isActive ? 'bg-blue-500/10 border-blue-500/30' : 'bg-black/40 border-white/10'}`}
+          <h4
+            className={`font-bold text-base truncate pr-3 ${
+              isCompleted ? "text-slate-500 line-through" : "text-slate-100"
+            }`}
+          >
+            {task.title}
+          </h4>
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              onTimeClick(task);
+            }}
+            className={`shrink-0 px-2 py-1 rounded-lg border flex items-center justify-center cursor-pointer hover:bg-white/5 active:scale-95 transition-all ${
+              isActive
+                ? "bg-blue-500/10 border-blue-500/30"
+                : "bg-black/40 border-white/10"
+            }`}
+          >
+            <span
+              className={`font-mono text-sm font-bold leading-none ${
+                isActive ? "text-blue-400" : "text-slate-500"
+              }`}
             >
-               <span className={`font-mono text-sm font-bold leading-none ${isActive ? 'text-blue-400' : 'text-slate-500'}`}>
-                  {formatTime(task.duration)}
-               </span>
-            </div>
+              {formatTime(task.duration)}
+            </span>
+          </div>
         </div>
 
-      {/* 底部 */}
-      <div className="flex items-center justify-between pt-2 mt-2 border-t border-white/5">
+        {/* 底部 */}
+        <div className="flex items-center justify-between pt-2 mt-2 border-t border-white/5">
           <div className="flex items-center gap-2 min-w-0 overflow-hidden">
             <div className="shrink-0 px-2 py-1.5 rounded-md bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-mono flex items-center gap-1 font-bold">
               <Zap size={12} fill="currentColor" /> {currentXP}
             </div>
-            
+
             {/* 🔴 被你误删的金额胶囊找回来了，而且加上了变色魔法！ */}
-            <div className={`px-2 py-1.5 rounded-md border text-xs font-mono font-bold flex items-center gap-1 truncate max-w-[110px] transition-all duration-300 ${
-                showDebtWarning 
-                ? "text-rose-400 border-rose-500/30 bg-rose-500/5" : 
-                hasActualRevenue 
-                ? "text-amber-400 border-amber-500/50 bg-amber-500/10 shadow-[0_0_10px_rgba(245,158,11,0.15)]" : // 🌟 实际：金色发光
-                "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" // 🌿 预测：默认绿色
-            }`}>
-               {hasActualRevenue && <span className="text-[9px] bg-amber-500/20 px-1 rounded-sm mr-0.5 font-sans leading-none pb-px text-amber-500 border border-amber-500/20">实</span>}
-               ¥ {Number(displayMoney).toFixed(2)}
+            <div
+              className={`px-2 py-1.5 rounded-md border text-xs font-mono font-bold flex items-center gap-1 truncate max-w-[110px] transition-all duration-300 ${
+                showDebtWarning
+                  ? "text-rose-400 border-rose-500/30 bg-rose-500/5"
+                  : hasActualRevenue
+                  ? "text-amber-400 border-amber-500/50 bg-amber-500/10 shadow-[0_0_10px_rgba(245,158,11,0.15)]" // 🌟 实际：金色发光
+                  : "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" // 🌿 预测：默认绿色
+              }`}
+            >
+              {hasActualRevenue && (
+                <span className="text-[9px] bg-amber-500/20 px-1 rounded-sm mr-0.5 font-sans leading-none pb-px text-amber-500 border border-amber-500/20">
+                  实
+                </span>
+              )}
+              ¥ {Number(displayMoney).toFixed(2)}
             </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
-             {isCompleted ? (
-                <>
-                   <button onClick={(e) => { e.stopPropagation(); handleRevenueEdit(task); }} className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center border border-emerald-500/30 hover:bg-emerald-500/20 transition-all active:scale-90"><RefreshCcw size={15} /></button>
-                   <button onClick={(e) => { e.stopPropagation(); handleTaskAction("revert", task.id); }} className="w-9 h-9 rounded-xl bg-slate-700/50 text-slate-400 flex items-center justify-center hover:text-white transition-all active:scale-90"><Undo2 size={16} /></button>
-                </>
-             ) : (
-                <>
-                   <button onClick={(e) => { e.stopPropagation(); handleTaskAction("toggle", task.id); }} className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all shadow-lg active:scale-90 ${isActive ? "bg-amber-500 text-slate-900 shadow-amber-500/30" : "bg-slate-700 text-white hover:bg-slate-600"}`}>{isActive ? <Square size={14} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}</button>
-                   <button onClick={(e) => { e.stopPropagation(); handleTaskAction("complete", task.id); }} className="w-9 h-9 rounded-xl border-2 border-emerald-500 text-emerald-500 flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all active:scale-90"><CheckSquare size={16} /></button>
-                </>
-             )}
+            {isCompleted ? (
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRevenueEdit(task);
+                  }}
+                  className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center border border-emerald-500/30 hover:bg-emerald-500/20 transition-all active:scale-90"
+                >
+                  <RefreshCcw size={15} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTaskAction("revert", task.id);
+                  }}
+                  className="w-9 h-9 rounded-xl bg-slate-700/50 text-slate-400 flex items-center justify-center hover:text-white transition-all active:scale-90"
+                >
+                  <Undo2 size={16} />
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTaskAction("toggle", task.id);
+                  }}
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all shadow-lg active:scale-90 ${
+                    isActive
+                      ? "bg-amber-500 text-slate-900 shadow-amber-500/30"
+                      : "bg-slate-700 text-white hover:bg-slate-600"
+                  }`}
+                >
+                  {isActive ? (
+                    <Square size={14} fill="currentColor" />
+                  ) : (
+                    <Play size={16} fill="currentColor" className="ml-0.5" />
+                  )}
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTaskAction("complete", task.id);
+                  }}
+                  className="w-9 h-9 rounded-xl border-2 border-emerald-500 text-emerald-500 flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all active:scale-90"
+                >
+                  <CheckSquare size={16} />
+                </button>
+              </>
+            )}
           </div>
         </div>
-        
-        {isActive && <div className="absolute bottom-0 left-0 w-full h-1 bg-blue-500 animate-pulse-slow"></div>}
+
+        {isActive && (
+          <div className="absolute bottom-0 left-0 w-full h-1 bg-blue-500 animate-pulse-slow"></div>
+        )}
       </div>
     </div>
   );
@@ -925,12 +1076,12 @@ const App = () => {
   // 👇👇👇 2. 自动展开逻辑：当有任务开始时，自动展开它所在的分组 👇👇👇
   useEffect(() => {
     if (activeTaskId) {
-      const activeTask = tasks.find(t => t.id === activeTaskId);
+      const activeTask = tasks.find((t) => t.id === activeTaskId);
       if (activeTask) {
         const groupName = activeTask.project || "默认项目";
-        setExpandedGroups(prev => ({
+        setExpandedGroups((prev) => ({
           ...prev,
-          [groupName]: true // 强制展开当前正在进行的分组
+          [groupName]: true, // 强制展开当前正在进行的分组
         }));
       }
     }
@@ -1105,35 +1256,52 @@ const App = () => {
   // --- Stats (分离实际与预测) ---
   const stats = useMemo(() => {
     const completed = tasks.filter((t) => t.status === "Completed");
-    const totalDurationHrs = tasks.reduce((acc, t) => acc + (t.duration || 0), 0) / 3600;
-    
+    const totalDurationHrs =
+      tasks.reduce((acc, t) => acc + (t.duration || 0), 0) / 3600;
+
     // 🔴 1. 拆分：实际已核算的钱 vs 尚未核算的预测钱
     let actualRev = 0;
     let predictedRev = 0;
 
-    completed.forEach(t => {
-        if (t.actualRevenue != null) {
-            actualRev += Number(t.actualRevenue);
-        } else {
-            const isBounty = t.mode === 'bounty';
-            const p = isBounty ? (t.fixedReward || 0) : ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
-            predictedRev += p;
-        }
+    completed.forEach((t) => {
+      if (t.actualRevenue != null) {
+        actualRev += Number(t.actualRevenue);
+      } else {
+        const isBounty = t.mode === "bounty";
+        const p = isBounty
+          ? t.fixedReward || 0
+          : ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
+        predictedRev += p;
+      }
     });
 
     const totalRevenue = actualRev + predictedRev; // ROI 计算仍然用总钱数
     const avgROI = totalDurationHrs > 0 ? totalRevenue / totalDurationHrs : 0;
-    
+
     const timeDebtTasks = completed.filter((t) => {
       const hrs = (t.duration || 0) / 3600;
       return hrs > 0 && (t.actualRevenue || 0) / hrs < HOURLY_THRESHOLD;
     }).length;
-    
+
     const recentReviews = reviews.slice(0, 7);
-    const avgAgency = recentReviews.length > 0 ? (recentReviews.reduce((acc, r) => acc + Number(r.agency), 0) / recentReviews.length).toFixed(1) : 0;
-    
+    const avgAgency =
+      recentReviews.length > 0
+        ? (
+            recentReviews.reduce((acc, r) => acc + Number(r.agency), 0) /
+            recentReviews.length
+          ).toFixed(1)
+        : 0;
+
     // 🔴 2. 导出新变量
-    return { totalDurationHrs, totalRevenue, actualRev, predictedRev, avgROI, timeDebtTasks, avgAgency };
+    return {
+      totalDurationHrs,
+      totalRevenue,
+      actualRev,
+      predictedRev,
+      avgROI,
+      timeDebtTasks,
+      avgAgency,
+    };
   }, [tasks, reviews]);
   // 👇👇👇 补上这段缺失的逻辑，白屏立刻就好 👇👇👇
   const [showUserMenu, setShowUserMenu] = useState(false); // 1. 控制菜单开关
@@ -1203,230 +1371,233 @@ const App = () => {
     document.body.removeChild(a);
   };
 
- // 👇👇👇 最终修复版 handleTaskAction (暂停、完成均强制存档，拒绝清零) 👇👇👇
- const handleTaskAction = async (action, taskId, payload = null) => {
-  if (!user) return;
-  
-  // 1. 获取当前内存中的最新任务状态 (包含刚刚跑出来的 duration)
-  const task = tasks.find((t) => t.id === taskId);
-  if (!task) return; 
+  // 👇👇👇 最终修复版 handleTaskAction (暂停、完成均强制存档，拒绝清零) 👇👇👇
+  const handleTaskAction = async (action, taskId, payload = null) => {
+    if (!user) return;
 
-  const updates = {};
+    // 1. 获取当前内存中的最新任务状态 (包含刚刚跑出来的 duration)
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
 
-  // --- 动作 1: 开始/暂停 (Toggle) ---
-  if (action === "toggle") {
-    if (activeTaskId === taskId) {
-      // 🛑 情况 A: 正在进行 -> 暂停
-      setActiveTaskId(null);
-      updates.status = "Pending";
-      
-      // 🚨🚨🚨 核心修复：暂停时也要存档！🚨🚨🚨
-      // 把内存里的时间写入数据库，防止被云端旧数据覆盖
-      updates.duration = task.duration || 0; 
-      
-    } else {
-      // ▶️ 情况 B: 暂停/未开始 -> 开始
-      setActiveTaskId(taskId);
-      updates.status = "In Progress";
+    const updates = {};
+
+    // --- 动作 1: 开始/暂停 (Toggle) ---
+    if (action === "toggle") {
+      if (activeTaskId === taskId) {
+        // 🛑 情况 A: 正在进行 -> 暂停
+        setActiveTaskId(null);
+        updates.status = "Pending";
+
+        // 🚨🚨🚨 核心修复：暂停时也要存档！🚨🚨🚨
+        // 把内存里的时间写入数据库，防止被云端旧数据覆盖
+        updates.duration = task.duration || 0;
+      } else {
+        // ▶️ 情况 B: 暂停/未开始 -> 开始
+        setActiveTaskId(taskId);
+        updates.status = "In Progress";
+      }
     }
-  }
 
- // --- 动作 2: 完成任务 (Complete) ---
- if (action === "complete") {
-  if (activeTaskId === taskId) setActiveTaskId(null); // 停止计时
-  updates.status = "Completed";
-  updates.endTime = new Date().toISOString();
-  
-  updates.duration = task.duration || 0; 
+    // --- 动作 2: 完成任务 (Complete) ---
+    if (action === "complete") {
+      if (activeTaskId === taskId) setActiveTaskId(null); // 停止计时
+      updates.status = "Completed";
+      updates.endTime = new Date().toISOString();
 
-  // 🚨 核心修复 3：完成任务时，不再自动写入 actualRevenue！
-  // 无论是计时还是悬赏，完成时一律保持“绿色的预测状态”，等你主动去点核算！
-}
+      updates.duration = task.duration || 0;
 
-  // --- 动作 3: 删除任务 ---
-  if (action === "delete") {
-    if (window.confirm("确认删除？")) {
-      if (isLocalMode)
-        setTasks((prev) => prev.filter((t) => t.id !== taskId));
-      else
-        await deleteDoc(
-          doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId)
+      // 🚨 核心修复 3：完成任务时，不再自动写入 actualRevenue！
+      // 无论是计时还是悬赏，完成时一律保持“绿色的预测状态”，等你主动去点核算！
+    }
+
+    // --- 动作 3: 删除任务 ---
+    if (action === "delete") {
+      if (window.confirm("确认删除？")) {
+        if (isLocalMode)
+          setTasks((prev) => prev.filter((t) => t.id !== taskId));
+        else
+          await deleteDoc(
+            doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId)
+          );
+      }
+      return;
+    }
+    // --- 动作 4: 撤销完成 (终极修复：清空结算数据 + 激活计时) ---
+    if (action === "revert") {
+      // 1. 状态回滚
+      updates.status = "In Progress";
+      updates.endTime = null;
+      updates.duration = task.duration || 0;
+
+      // 🔴 核心修复：清空“已结算金额”。
+      // 只有把这个字段清空，卡片才会重新使用 (时长 * 时薪) 的公式来实时跳动金额。
+      updates.actualRevenue = null;
+
+      // 2. 重新激活全局计时器
+      setActiveTaskId(taskId);
+    }
+    // --- 动作 5: 手动核算金额 ---
+    if (action === "revenue") {
+      // 🔴 修改点：读取 payload 而不是 revenueInput。支持接收 null 以便“撤回”核算
+      updates.actualRevenue = payload === null ? null : Number(payload);
+    }
+
+    // --- 动作 6: 补录/调整时间 (调整时间时不破坏预测状态) ---
+    if (action === "adjust") {
+      const currentDuration = task.duration || 0;
+
+      // 1. 计算新的总时长
+      const newDuration = currentDuration + Number(payload.addMinutes) * 60;
+      updates.duration = newDuration;
+
+      // 🚨 核心修复 4：除非你在补录时间的同时追加了实打实的金额，否则不碰 actualRevenue！
+      if (Number(payload.addRevenue) > 0) {
+        updates.actualRevenue =
+          (task.actualRevenue || 0) + Number(payload.addRevenue);
+      }
+      // （删除了自作聪明重算 actualRevenue 的逻辑，让卡片去实时预测）
+
+      // 3. 状态处理
+      if (payload.shouldStart) {
+        updates.status = "In Progress";
+        setActiveTaskId(taskId);
+      }
+      setShowAdjustModal(false);
+    }
+
+    // --- 统一提交更新 ---
+    if (Object.keys(updates).length > 0) {
+      if (isLocalMode) {
+        updateLocalTask(taskId, updates);
+      } else {
+        await updateDoc(
+          doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId),
+          updates
         );
+      }
     }
-    return;
-  }
-  // --- 动作 4: 撤销完成 (终极修复：清空结算数据 + 激活计时) ---
-  if (action === "revert") {
-    // 1. 状态回滚
-    updates.status = "In Progress"; 
-    updates.endTime = null;
-    updates.duration = task.duration || 0; 
-    
-    // 🔴 核心修复：清空“已结算金额”。
-    // 只有把这个字段清空，卡片才会重新使用 (时长 * 时薪) 的公式来实时跳动金额。
-    updates.actualRevenue = null; 
-    
-    // 2. 重新激活全局计时器
-    setActiveTaskId(taskId); 
-  }
-  // --- 动作 5: 手动核算金额 ---
-  if (action === "revenue") {
-    // 🔴 修改点：读取 payload 而不是 revenueInput。支持接收 null 以便“撤回”核算
-    updates.actualRevenue = payload === null ? null : Number(payload);
-  }
-
-  // --- 动作 6: 补录/调整时间 (调整时间时不破坏预测状态) ---
-  if (action === "adjust") {
-    const currentDuration = task.duration || 0;
-    
-    // 1. 计算新的总时长
-    const newDuration = currentDuration + Number(payload.addMinutes) * 60;
-    updates.duration = newDuration;
-
-    // 🚨 核心修复 4：除非你在补录时间的同时追加了实打实的金额，否则不碰 actualRevenue！
-    if (Number(payload.addRevenue) > 0) {
-        updates.actualRevenue = (task.actualRevenue || 0) + Number(payload.addRevenue);
-    }
-    // （删除了自作聪明重算 actualRevenue 的逻辑，让卡片去实时预测）
-    
-    // 3. 状态处理
-    if (payload.shouldStart) {
-      updates.status = "In Progress";
-      setActiveTaskId(taskId);
-    }
-    setShowAdjustModal(false);
-  }
-
-  // --- 统一提交更新 ---
-  if (Object.keys(updates).length > 0) {
-    if (isLocalMode) {
-      updateLocalTask(taskId, updates);
-    } else {
-      await updateDoc(
-        doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId),
-        updates
-      );
-    }
-  }
   };
   // 🔴 终极修复：处理验算逻辑 (修复长小数，支持清空撤回)
   const handleRevenueEdit = (task) => {
     setEditRevenueId(task.id);
-    
+
     // 先计算出当前的预测金额
     const predicted = ((task.duration || 0) / 3600) * (task.hourlyRate || 0);
     // 如果有实际金额用实际，否则用预测
     const current = task.actualRevenue != null ? task.actualRevenue : predicted;
-    
+
     // 弹出输入框，并使用 .toFixed(2) 保证不会出现 35.41666666 这种数字
-    const newVal = prompt("核算实际收益 (¥):\n如果不准，请修改；如果留空并确认，将自动撤销并恢复为预测收益。", Number(current).toFixed(2));
-    
+    const newVal = prompt(
+      "核算实际收益 (¥):\n如果不准，请修改；如果留空并确认，将自动撤销并恢复为预测收益。",
+      Number(current).toFixed(2)
+    );
+
     if (newVal !== null) {
-        if (newVal.trim() === "") {
-            // 留空代表撤销实际收益，恢复为系统预测
-            handleTaskAction("revenue", task.id, null);
-        } else {
-            // 输入了新数字，确认为实际收益
-            handleTaskAction("revenue", task.id, Number(newVal));
-        }
+      if (newVal.trim() === "") {
+        // 留空代表撤销实际收益，恢复为系统预测
+        handleTaskAction("revenue", task.id, null);
+      } else {
+        // 输入了新数字，确认为实际收益
+        handleTaskAction("revenue", task.id, Number(newVal));
+      }
     }
-};
+  };
   const handleTimeClick = (task) => {
-  // 打开补录弹窗，并重置输入框
-  setAdjustTaskData({ id: task.id, addMinutes: 0, addRevenue: 0 });
-  setShowAdjustModal(true);
-};
-
-// 👇👇👇 替换原来的 addTask 函数 (彻底修复金额死锁，永远保持预测) 👇👇👇
-const addTask = async (shouldStartImmediately = false) => {
-  if (!user) return;
-
-  // 1. 确定项目名称
-  const finalProject = isNewProject
-    ? newTask.customProject || "未命名项目"
-    : newTask.project || "默认项目";
-
-  if (!newTask.title && !isManualEntry) return;
-
-  const id = Date.now().toString();
-
-  // 2. 确定时间 (补录 vs 实时)
-  let finalDate = new Date().toISOString();
-  if (isManualEntry && targetDate) {
-    finalDate = new Date(targetDate + "T12:00:00").toISOString();
-  }
-
-  // 3. 核心：计算 XP 倍率 (The Growth Multiplier)
-  let multiplier = 1.0;
-  if (newTask.xpType === "growth") multiplier = 2.0; // 进化 = 2倍经验
-  if (newTask.xpType === "maintenance") multiplier = 0.5; // 维持 = 0.5倍经验
-
-  // 4. 构建任务数据包
-  let taskData = {
-    id,
-    title: newTask.title || "快速记录",
-    project: finalProject,
-    createdAt: finalDate,
-
-    // --- RPG 新属性 ---
-    mode: newTask.mode || "stream", // 'stream' (计时) or 'bounty' (悬赏)
-    xpType: newTask.xpType || "work", // 'growth', 'work', 'maintenance'
-    expMult: multiplier, 
-
-    hourlyRate: newTask.mode === "bounty" ? 0 : Number(newTask.estValue),
-    fixedReward: newTask.mode === "bounty" ? Number(newTask.estValue) : 0,
-
-    // --- 补录数据 ---
-    duration: Number(newTask.manualDurationMinutes) * 60,
-    
-    // 🚨 核心修复 1：新建时一律设为 null！强制它保持“绿色的预测状态”！
-    actualRevenue: null, 
+    // 打开补录弹窗，并重置输入框
+    setAdjustTaskData({ id: task.id, addMinutes: 0, addRevenue: 0 });
+    setShowAdjustModal(true);
   };
 
-  // 5. 状态流转
-  if (shouldStartImmediately) {
-    taskData.status = "In Progress";
-    setActiveTaskId(id);
-  } else if (isManualEntry) {
-    taskData.status = "Completed";
-    taskData.endTime = finalDate;
+  // 👇👇👇 替换原来的 addTask 函数 (彻底修复金额死锁，永远保持预测) 👇👇👇
+  const addTask = async (shouldStartImmediately = false) => {
+    if (!user) return;
 
-    // 🚨 核心修复 2：只有当你在补录时，真真实实填了 > 0 的钱，它才会变成实际收益
-    const manualRev = Number(newTask.manualRevenue);
-    if (manualRev > 0) {
-        taskData.actualRevenue = manualRev;
+    // 1. 确定项目名称
+    const finalProject = isNewProject
+      ? newTask.customProject || "未命名项目"
+      : newTask.project || "默认项目";
+
+    if (!newTask.title && !isManualEntry) return;
+
+    const id = Date.now().toString();
+
+    // 2. 确定时间 (补录 vs 实时)
+    let finalDate = new Date().toISOString();
+    if (isManualEntry && targetDate) {
+      finalDate = new Date(targetDate + "T12:00:00").toISOString();
     }
-    // （完美删除了自动把预测变实际的逻辑，交由 UI 动态计算）
-  } else {
-    taskData.status = "Pending";
-  }
 
-  // 6. 保存到数据库
-  if (isLocalMode) {
-    setTasks((prev) => [taskData, ...prev]);
-  } else {
-    await setDoc(
-      doc(db, "artifacts", appId, "users", user.uid, "tasks", id),
-      taskData
-    );
-  }
+    // 3. 核心：计算 XP 倍率 (The Growth Multiplier)
+    let multiplier = 1.0;
+    if (newTask.xpType === "growth") multiplier = 2.0; // 进化 = 2倍经验
+    if (newTask.xpType === "maintenance") multiplier = 0.5; // 维持 = 0.5倍经验
 
-  // 7. 重置表单 (保留项目以便连续输入)
-  setNewTask({
-    title: "",
-    project: finalProject,
-    customProject: "",
-    estValue: 0,
-    manualDurationMinutes: 0,
-    manualRevenue: 0,
-    mode: "stream", 
-    xpType: "work", 
-  });
-  setShowAddModal(false);
-  setIsManualEntry(false);
-  setIsNewProject(false);
-  setTargetDate(null);
-};
+    // 4. 构建任务数据包
+    let taskData = {
+      id,
+      title: newTask.title || "快速记录",
+      project: finalProject,
+      createdAt: finalDate,
+
+      // --- RPG 新属性 ---
+      mode: newTask.mode || "stream", // 'stream' (计时) or 'bounty' (悬赏)
+      xpType: newTask.xpType || "work", // 'growth', 'work', 'maintenance'
+      expMult: multiplier,
+
+      hourlyRate: newTask.mode === "bounty" ? 0 : Number(newTask.estValue),
+      fixedReward: newTask.mode === "bounty" ? Number(newTask.estValue) : 0,
+
+      // --- 补录数据 ---
+      duration: Number(newTask.manualDurationMinutes) * 60,
+
+      // 🚨 核心修复 1：新建时一律设为 null！强制它保持“绿色的预测状态”！
+      actualRevenue: null,
+    };
+
+    // 5. 状态流转
+    if (shouldStartImmediately) {
+      taskData.status = "In Progress";
+      setActiveTaskId(id);
+    } else if (isManualEntry) {
+      taskData.status = "Completed";
+      taskData.endTime = finalDate;
+
+      // 🚨 核心修复 2：只有当你在补录时，真真实实填了 > 0 的钱，它才会变成实际收益
+      const manualRev = Number(newTask.manualRevenue);
+      if (manualRev > 0) {
+        taskData.actualRevenue = manualRev;
+      }
+      // （完美删除了自动把预测变实际的逻辑，交由 UI 动态计算）
+    } else {
+      taskData.status = "Pending";
+    }
+
+    // 6. 保存到数据库
+    if (isLocalMode) {
+      setTasks((prev) => [taskData, ...prev]);
+    } else {
+      await setDoc(
+        doc(db, "artifacts", appId, "users", user.uid, "tasks", id),
+        taskData
+      );
+    }
+
+    // 7. 重置表单 (保留项目以便连续输入)
+    setNewTask({
+      title: "",
+      project: finalProject,
+      customProject: "",
+      estValue: 0,
+      manualDurationMinutes: 0,
+      manualRevenue: 0,
+      mode: "stream",
+      xpType: "work",
+    });
+    setShowAddModal(false);
+    setIsManualEntry(false);
+    setIsNewProject(false);
+    setTargetDate(null);
+  };
 
   // 👇👇👇 这是新加的函数，专门处理日历点击 👇👇👇
   const handleCalendarDateSelect = (dateStr, dayData) => {
@@ -1577,26 +1748,40 @@ const addTask = async (shouldStartImmediately = false) => {
       <div className="sticky top-0 z-40 bg-[#020617]/70 backdrop-blur-2xl border-b border-white/5 px-4 py-3 shadow-sm">
         {/* 增加 max-w-4xl mx-auto，确保在电脑大屏上也不会拉伸得很丑 */}
         <div className="flex justify-between items-center relative max-w-4xl mx-auto">
-          
           {/* === 左侧：玩家状态 HUD === */}
           <div className="flex items-center gap-3 flex-1">
             <div className="relative">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20 border border-white/10">
-                <span className="font-bold text-white font-mono text-sm">Lv.{playerStats.level}</span>
+                <span className="font-bold text-white font-mono text-sm">
+                  Lv.{playerStats.level}
+                </span>
               </div>
-              <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-[#020617] ${isLocalMode ? "bg-amber-500" : "bg-emerald-500"}`}></div>
+              <div
+                className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-[#020617] ${
+                  isLocalMode ? "bg-amber-500" : "bg-emerald-500"
+                }`}
+              ></div>
             </div>
 
             <div className="flex-1 max-w-[140px]">
               <div className="flex justify-between items-end mb-1">
                 <span className="text-xs font-bold text-white tracking-wider flex items-center gap-1">
                   {playerStats.title}
-                  {isLocalMode && <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1 rounded">OFFLINE</span>}
+                  {isLocalMode && (
+                    <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1 rounded">
+                      OFFLINE
+                    </span>
+                  )}
                 </span>
-                <span className="text-[9px] font-mono text-blue-300">{playerStats.currentLevelXP}/{playerStats.nextLevelXP}</span>
+                <span className="text-[9px] font-mono text-blue-300">
+                  {playerStats.currentLevelXP}/{playerStats.nextLevelXP}
+                </span>
               </div>
               <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
-                <div className="h-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)]" style={{ width: `${playerStats.progress}%` }}></div>
+                <div
+                  className="h-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)]"
+                  style={{ width: `${playerStats.progress}%` }}
+                ></div>
               </div>
             </div>
           </div>
@@ -1604,38 +1789,56 @@ const addTask = async (shouldStartImmediately = false) => {
           {/* === 中间：PC 端专属导航栏 (核心修复) === */}
           {/* md:flex 表示在大于 iPad 宽度的屏幕上显示，absolute 绝对居中 */}
           <div className="hidden md:flex items-center gap-10 absolute left-1/2 -translate-x-1/2">
-             <button 
-                onClick={() => setActiveTab("execution")} 
-                className={`text-sm font-bold flex items-center gap-2 transition-all ${activeTab === "execution" ? "text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.6)]" : "text-slate-500 hover:text-slate-300"}`}
-             >
-                <LayoutDashboard size={18}/> 作战
-             </button>
-             <button 
-                onClick={() => setActiveTab("audit")} 
-                className={`text-sm font-bold flex items-center gap-2 transition-all ${activeTab === "audit" ? "text-rose-400 drop-shadow-[0_0_8px_rgba(251,113,133,0.6)]" : "text-slate-500 hover:text-slate-300"}`}
-             >
-                <Heart size={18}/> 审计
-             </button>
-             <button 
-                onClick={() => setActiveTab("assets")} 
-                className={`text-sm font-bold flex items-center gap-2 transition-all ${activeTab === "assets" ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.6)]" : "text-slate-500 hover:text-slate-300"}`}
-             >
-                <ShieldCheck size={18}/> 资产
-             </button>
+            <button
+              onClick={() => setActiveTab("execution")}
+              className={`text-sm font-bold flex items-center gap-2 transition-all ${
+                activeTab === "execution"
+                  ? "text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.6)]"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              <LayoutDashboard size={18} /> 作战
+            </button>
+            <button
+              onClick={() => setActiveTab("audit")}
+              className={`text-sm font-bold flex items-center gap-2 transition-all ${
+                activeTab === "audit"
+                  ? "text-rose-400 drop-shadow-[0_0_8px_rgba(251,113,133,0.6)]"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              <Heart size={18} /> 审计
+            </button>
+            <button
+              onClick={() => setActiveTab("assets")}
+              className={`text-sm font-bold flex items-center gap-2 transition-all ${
+                activeTab === "assets"
+                  ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.6)]"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              <ShieldCheck size={18} /> 资产
+            </button>
           </div>
 
           {/* === 右侧：用户菜单 === */}
           <div className="flex-1 flex justify-end">
-             <button
-                onClick={() => setShowUserMenu(!showUserMenu)}
-                className="p-1 rounded-full hover:bg-white/5 text-slate-400 hover:text-white transition-colors active:scale-90"
-              >
-                {user?.photoURL ? (
-                  <img src={user.photoURL} className="w-8 h-8 rounded-full border border-white/10" alt="User" />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center"><LayoutDashboard size={16} /></div>
-                )}
-             </button>
+            <button
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              className="p-1 rounded-full hover:bg-white/5 text-slate-400 hover:text-white transition-colors active:scale-90"
+            >
+              {user?.photoURL ? (
+                <img
+                  src={user.photoURL}
+                  className="w-8 h-8 rounded-full border border-white/10"
+                  alt="User"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
+                  <LayoutDashboard size={16} />
+                </div>
+              )}
+            </button>
           </div>
         </div>
 
@@ -1878,48 +2081,53 @@ const addTask = async (shouldStartImmediately = false) => {
               </div>
             </div>
 
+            {/* 🔴 重新编排的 4 个数据看板 */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 relative z-10">
               <StatBox
                 label="真实时薪 (ROI)"
-                value={`¥${stats.avgROI.toFixed(0)}`}
+                prefix="¥" // 👈 把符号单独拆出来
+                value={stats.avgROI.toFixed(0)} // 👈 这里只传纯数字
                 unit="/h"
                 color={
                   stats.avgROI < HOURLY_THRESHOLD
-                    ? "text-rose-400"
-                    : "text-emerald-400"
+                    ? "text-rose-400 drop-shadow-[0_0_10px_rgba(244,63,94,0.3)]"
+                    : "text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.3)]"
                 }
                 icon={<TrendingUp size={14} />}
                 onClick={() => setSelectedStat("roi")}
               />
               <StatBox
-                label="累计营收 (实际落袋)"
-                // 🔴 toLocaleString 限制最多2位小数，并自动加逗号 (如: 2,985.56)
-                value={`¥${stats.actualRev.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`}
+                label="累计营收 (落袋)"
+                prefix="¥"
+                value={stats.actualRev.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 unit=""
-                color="text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.3)]" // 实际营收用金色
+                color="text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)]"
                 icon={<DollarSign size={14} />}
                 onClick={() => setSelectedStat("revenue")}
-                // 🔴 加入绿色的预测收益小标签
                 subNode={
-                    <div className="text-[10px] text-emerald-400 font-mono font-bold flex items-center gap-1 bg-emerald-500/10 w-fit px-1.5 py-0.5 rounded border border-emerald-500/20">
-                        +¥{stats.predictedRev.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})} 预测
-                    </div>
+                  <div className="text-[10px] text-emerald-400 font-mono font-bold flex items-center gap-1 bg-emerald-500/10 w-fit px-1.5 py-0.5 rounded border border-emerald-500/20">
+                    +¥{stats.predictedRev.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 预测
+                  </div>
                 }
               />
               <StatBox
                 label="总投入时长"
+                prefix=""
                 value={stats.totalDurationHrs.toFixed(1)}
                 unit="h"
-                color="text-blue-400"
+                color="text-blue-400 drop-shadow-[0_0_10px_rgba(59,130,246,0.3)]"
                 icon={<Clock size={14} />}
                 onClick={() => setSelectedStat("duration")}
               />
               <StatBox
                 label="时间负债"
+                prefix=""
                 value={stats.timeDebtTasks}
                 unit="个"
                 color={
-                  stats.timeDebtTasks > 0 ? "text-rose-400" : "text-slate-400"
+                  stats.timeDebtTasks > 0
+                    ? "text-rose-400 drop-shadow-[0_0_10px_rgba(244,63,94,0.3)]"
+                    : "text-slate-400"
                 }
                 icon={<AlertCircle size={14} />}
                 onClick={() => setSelectedStat("debt")}
@@ -1934,69 +2142,92 @@ const addTask = async (shouldStartImmediately = false) => {
                     暂无战斗部署，请新建项目。
                   </div>
                 )}
-                
+
                 {/* 任务分组渲染 */}
-              {/* 👇👇👇 任务分组渲染 (Grid 动画版) 👇👇👇 */}
-              {groupedTasks.map((group) => {
+                {/* 👇👇👇 任务分组渲染 (Grid 动画版) 👇👇👇 */}
+                {groupedTasks.map((group) => {
                   const isExpanded = expandedGroups[group.name];
 
                   return (
-                    <div key={group.name} className="space-y-0"> {/* 间距由内部控制 */}
+                    <div key={group.name} className="space-y-0">
+                      {" "}
+                      {/* 间距由内部控制 */}
                       {/* 分组标题栏 */}
                       <div
                         className="flex items-center gap-3 py-3 px-1 cursor-pointer select-none group/header"
                         onClick={() => toggleGroup(group.name)}
                       >
-                        <div className={`p-1.5 rounded-lg border transition-all duration-300 ${isExpanded ? "bg-blue-500/20 border-blue-500/30 text-blue-400 rotate-90" : "bg-slate-800/50 border-white/5 text-slate-500 rotate-0"}`}>
+                        <div
+                          className={`p-1.5 rounded-lg border transition-all duration-300 ${
+                            isExpanded
+                              ? "bg-blue-500/20 border-blue-500/30 text-blue-400 rotate-90"
+                              : "bg-slate-800/50 border-white/5 text-slate-500 rotate-0"
+                          }`}
+                        >
                           <ChevronRight size={14} />
                         </div>
-                        <h3 className={`text-xs font-bold uppercase tracking-widest ${isExpanded ? "text-white" : "text-slate-500"}`}>
+                        <h3
+                          className={`text-xs font-bold uppercase tracking-widest ${
+                            isExpanded ? "text-white" : "text-slate-500"
+                          }`}
+                        >
                           {group.name}
                         </h3>
                         <div className="h-px bg-slate-800 flex-1 ml-2 group-hover/header:bg-slate-700 transition-colors"></div>
                         <span className="text-[10px] text-slate-600 font-mono">
-                          {formatTime(group.totalTime)} · ¥{group.totalRev.toFixed(0)}
+                          {formatTime(group.totalTime)} · ¥
+                          {group.totalRev.toFixed(0)}
                         </span>
                       </div>
-
                       {/* 🔴 核心动画修改：使用 CSS Grid 实现手风琴效果 
                           不再使用条件渲染 ({isExpanded && ...})
                           grid-rows-[0fr] -> 高度为0，隐藏
                           grid-rows-[1fr] -> 高度自动适应，展开
                       */}
-                      <div 
+                      <div
                         className={`grid transition-[grid-template-rows] duration-300 ease-out ${
-                          isExpanded ? "grid-rows-[1fr] mb-4" : "grid-rows-[0fr] mb-0"
+                          isExpanded
+                            ? "grid-rows-[1fr] mb-4"
+                            : "grid-rows-[0fr] mb-0"
                         }`}
                       >
                         <div className="overflow-hidden min-h-0">
-                           <div className="pt-2 space-y-3"> {/* 内部增加一点 pt 防止贴太紧 */}
-                              {group.tasks.map((task) => {
-                                const isActive = activeTaskId === task.id;
-                                const isCompleted = task.status === "Completed";
-                                const isBounty = task.mode === 'bounty';
-                                const taskHours = (task.duration || 0) / 3600;
-                                const currentRev = task.actualRevenue || ((task.duration || 0)/3600 * task.hourlyRate);
-                                const realHourlyRate = taskHours > 0 ? currentRev / taskHours : 0;
-                                const isTimeDebt = !isBounty && isCompleted && taskHours > 0 && realHourlyRate < HOURLY_THRESHOLD;
-                                
-                                return (
-                                  <SwipeableTaskCard 
-                                     key={task.id}
-                                     task={task}
-                                     isActive={isActive}
-                                     isTimeDebt={isTimeDebt}
-                                     isCompleted={isCompleted}
-                                     handleTaskAction={handleTaskAction}
-                                     formatTime={formatTime}
-                                     setEditRevenueId={setEditRevenueId}
-                                     setRevenueInput={setRevenueInput}
-                                     handleRevenueEdit={handleRevenueEdit}
-                                     onTimeClick={handleTimeClick} // 👈 记得加上这一行！
-                                  />
-                                );
-                              })}
-                           </div>
+                          <div className="pt-2 space-y-3">
+                            {" "}
+                            {/* 内部增加一点 pt 防止贴太紧 */}
+                            {group.tasks.map((task) => {
+                              const isActive = activeTaskId === task.id;
+                              const isCompleted = task.status === "Completed";
+                              const isBounty = task.mode === "bounty";
+                              const taskHours = (task.duration || 0) / 3600;
+                              const currentRev =
+                                task.actualRevenue ||
+                                ((task.duration || 0) / 3600) * task.hourlyRate;
+                              const realHourlyRate =
+                                taskHours > 0 ? currentRev / taskHours : 0;
+                              const isTimeDebt =
+                                !isBounty &&
+                                isCompleted &&
+                                taskHours > 0 &&
+                                realHourlyRate < HOURLY_THRESHOLD;
+
+                              return (
+                                <SwipeableTaskCard
+                                  key={task.id}
+                                  task={task}
+                                  isActive={isActive}
+                                  isTimeDebt={isTimeDebt}
+                                  isCompleted={isCompleted}
+                                  handleTaskAction={handleTaskAction}
+                                  formatTime={formatTime}
+                                  setEditRevenueId={setEditRevenueId}
+                                  setRevenueInput={setRevenueInput}
+                                  handleRevenueEdit={handleRevenueEdit}
+                                  onTimeClick={handleTimeClick} // 👈 记得加上这一行！
+                                />
+                              );
+                            })}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2545,8 +2776,7 @@ const addTask = async (shouldStartImmediately = false) => {
                   ¥
                   {reportData.tasks.reduce(
                     (acc, t) => acc + (t.actualRevenue || 0),
-                    0
-                    .toFixed(2)
+                    (0).toFixed(2)
                   )}
                 </div>
               </div>
@@ -2807,27 +3037,56 @@ const addTask = async (shouldStartImmediately = false) => {
   );
 };
 
-const StatBox = ({ label, value, unit, color, icon, onClick, subNode }) => (
+// ==========================================
+// 核心卡片组件：StatBox (苹果原生级排版升级)
+// ==========================================
+const StatBox = ({
+  label,
+  prefix,
+  value,
+  unit,
+  color,
+  icon,
+  onClick,
+  subNode,
+}) => (
   <div
     onClick={onClick}
-    className="bg-black/20 border border-white/5 hover:border-white/10 p-4 rounded-2xl cursor-pointer group transition-all active:scale-95 flex flex-col justify-between"
+    className="bg-[#0f172a]/40 border border-slate-800/60 hover:border-slate-700 p-4 rounded-3xl cursor-pointer group transition-all duration-300 active:scale-95 flex flex-col justify-between relative overflow-hidden shadow-lg shadow-black/20"
   >
-    <div className="flex justify-between items-start mb-2">
-      <div className="text-[10px] text-slate-500 uppercase font-bold flex items-center gap-1 group-hover:text-blue-400 transition-colors">
+    <div className="flex justify-between items-start mb-3 relative z-10">
+      <div className="text-[10px] text-slate-400 uppercase tracking-widest font-bold flex items-center gap-1.5 group-hover:text-blue-400 transition-colors">
         {icon} {label}
       </div>
       <HelpCircle
-        size={10}
+        size={12}
         className="text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity"
       />
     </div>
-    <div>
-        <div className={`font-mono font-bold text-xl leading-none ${color}`}>
-          {value}
-          {unit && <span className="text-xs text-slate-600 ml-1 font-sans font-normal">{unit}</span>}
-        </div>
-        {/* 🔴 渲染额外的子信息（比如预测金额） */}
-        {subNode && <div className="mt-2">{subNode}</div>}
+
+    <div className="relative z-10">
+      {/* 🔴 核心修复：完美的基线对齐 (items-baseline) 与数字紧凑排版 (tabular-nums) */}
+      <div className={`flex items-baseline font-bold ${color}`}>
+        {/* 金钱符号变小，并降低一点透明度，不抢主体数字的戏 */}
+        {prefix && (
+          <span className="text-sm opacity-80 mr-0.5 font-sans font-medium">
+            {prefix}
+          </span>
+        )}
+
+        {/* 主体大数字：收紧字间距 */}
+        <span className="text-3xl tracking-tight tabular-nums">{value}</span>
+
+        {/* 单位标签：底边完美对齐，使用浅灰色 */}
+        {unit && (
+          <span className="text-xs text-slate-500 font-medium uppercase tracking-widest ml-1">
+            {unit}
+          </span>
+        )}
+      </div>
+
+      {/* 预测收益小标签 */}
+      {subNode && <div className="mt-2.5">{subNode}</div>}
     </div>
   </div>
 );
