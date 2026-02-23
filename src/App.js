@@ -1441,56 +1441,90 @@ const App = () => {
   }, [tasks, globalDate]);
 
   // =====================================================================
-  // 🌟 终极引擎 3：大盘统计 (Overview Stats - 支持多时间维度)
+  // 🌟 终极引擎 3：大盘统计 (精准支持跨天并提取项目排行)
   // =====================================================================
   const overviewStats = useMemo(() => {
     const now = new Date();
     const cutoff = new Date();
-
-    // 1. 根据选中区间，设定时间分界线
     if (overviewRange === "7d") cutoff.setDate(now.getDate() - 7);
     else if (overviewRange === "30d") cutoff.setDate(now.getDate() - 30);
     else if (overviewRange === "year")
       cutoff.setFullYear(now.getFullYear() - 1);
 
-    // 2. 过滤出该区间内的任务
-    const filteredTasks = tasks.filter((t) => {
-      if (overviewRange === "all") return true;
-      return new Date(t.createdAt) >= cutoff;
-    });
+    const cutoffStr = cutoff.toISOString().split("T")[0];
 
     let totalDurationHrs = 0;
     let actualRev = 0;
     let predictedRev = 0;
     let completedCount = 0;
+    const groups = {};
 
-    filteredTasks.forEach((t) => {
-      totalDurationHrs += (t.duration || 0) / 3600;
+    tasks.forEach((t) => {
+      let taskTimeInRange = 0;
 
-      if (t.status === "Completed") {
-        completedCount++;
-        if (t.actualRevenue != null) {
-          actualRev += Number(t.actualRevenue);
-        } else {
-          if (t.mode === "bounty") predictedRev += t.fixedReward || 0;
-          else predictedRev += ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
-        }
+      if (overviewRange === "all") {
+        taskTimeInRange = t.duration || 0;
+        if (t.status === "Completed") completedCount++;
       } else {
-        // 进行中/暂停的任务，也算预测收益 (仅限计时模式)
-        if (t.mode !== "bounty")
-          predictedRev += ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
+        if (t.dailyLog) {
+          Object.entries(t.dailyLog).forEach(([date, time]) => {
+            if (date >= cutoffStr) taskTimeInRange += time;
+          });
+        } else if (t.createdAt.split("T")[0] >= cutoffStr) {
+          taskTimeInRange = t.duration || 0;
+        }
+        if (
+          t.status === "Completed" &&
+          t.endTime &&
+          t.endTime.split("T")[0] >= cutoffStr
+        )
+          completedCount++;
+      }
+
+      if (taskTimeInRange > 0) {
+        totalDurationHrs += taskTimeInRange / 3600;
+
+        // 🚨 核心：归类到项目，计算时长和金额
+        const p = t.project || "默认项目";
+        if (!groups[p]) groups[p] = { name: p, totalTime: 0, totalRev: 0 };
+        groups[p].totalTime += taskTimeInRange;
+
+        let rev = 0;
+        if (t.actualRevenue != null) {
+          const ratio =
+            (t.duration || 0) > 0 ? taskTimeInRange / t.duration : 1;
+          rev = Number(t.actualRevenue) * ratio;
+          actualRev += rev;
+        } else {
+          if (t.mode === "bounty") {
+            if (
+              t.status === "Completed" &&
+              t.endTime &&
+              t.endTime.split("T")[0] >= cutoffStr
+            ) {
+              rev = t.fixedReward || 0;
+              predictedRev += rev;
+            }
+          } else {
+            rev = (taskTimeInRange / 3600) * (t.hourlyRate || 0);
+            predictedRev += rev;
+          }
+        }
+        groups[p].totalRev += rev;
       }
     });
-
-    const totalRev = actualRev + predictedRev;
-    const avgROI = totalDurationHrs > 0 ? totalRev / totalDurationHrs : 0;
 
     return {
       durationHrs: totalDurationHrs,
       actualRev,
       predictedRev,
-      avgROI,
+      avgROI:
+        totalDurationHrs > 0
+          ? (actualRev + predictedRev) / totalDurationHrs
+          : 0,
       completedCount,
+      // 🚨 极其关键：把算好的项目排行榜吐给 UI 渲染！
+      projects: Object.values(groups).sort((a, b) => b.totalTime - a.totalTime),
     };
   }, [tasks, overviewRange]);
 
@@ -1958,29 +1992,18 @@ const App = () => {
             </div>
           </div>
 
-          {/* === 中间：PC 端专属导航栏 (核心修复) === */}
-          {/* md:flex 表示在大于 iPad 宽度的屏幕上显示，absolute 绝对居中 */}
+          {/* === 中间：PC 端专属导航栏 === */}
           <div className="hidden md:flex items-center gap-10 absolute left-1/2 -translate-x-1/2">
             <button
-              onClick={() => {
-                const todayStr = new Date().toISOString().split("T")[0];
-                if (globalDate !== todayStr) {
-                  // 🚨 智能判断：如果游标在过去，点击加号直接进入该日的【补录模式】
-                  setTargetDate(globalDate);
-                  setIsManualEntry(true);
-                } else {
-                  // 如果游标在今天，正常进入【实时新建模式】
-                  setTargetDate(null);
-                  setIsManualEntry(false);
-                }
-                setShowAddModal(true);
-              }}
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg hover:scale-105 active:scale-95 transition-all"
+              onClick={() => setActiveTab("execution")}
+              className={`text-sm font-bold flex items-center gap-2 transition-all ${
+                activeTab === "execution"
+                  ? "text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.6)]"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
             >
-              <Plus size={18} />
-              <span className="hidden md:inline">投入新项目</span>
+              <LayoutDashboard size={18} /> 作战
             </button>
-
             <button
               onClick={() => setActiveTab("audit")}
               className={`text-sm font-bold flex items-center gap-2 transition-all ${
@@ -2002,7 +2025,6 @@ const App = () => {
               <ShieldCheck size={18} /> 资产
             </button>
           </div>
-
           {/* === 右侧：用户菜单 === */}
           <div className="flex-1 flex justify-end">
             <button
