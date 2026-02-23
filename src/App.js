@@ -473,8 +473,7 @@ const AuditItem = ({ type, val, setVal, note, setNote }) => {
   );
 };
 
-// --- Calendar ---
-// --- Calendar (终极可视化热力图版) ---
+// --- Calendar (终极可视化热力图版 + 零投入警示系统) ---
 const CalendarView = ({ type, data, onSelectDate }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -498,7 +497,7 @@ const CalendarView = ({ type, data, onSelectDate }) => {
       new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1)
     );
 
-  // 🚨 核心修复：日历引擎全面接入 dailyLog 跨天日记账系统
+  // 🚨 日历引擎全面接入 dailyLog 跨天日记账系统
   const getDataForDay = (day) => {
     const month = (currentDate.getMonth() + 1).toString().padStart(2, "0");
     const dayStr = day.toString().padStart(2, "0");
@@ -511,34 +510,26 @@ const CalendarView = ({ type, data, onSelectDate }) => {
       let totalRevenue = 0;
       let taskCount = 0;
 
-      data.forEach((t) => {
-        // 核心：这一天到底有没有留下汗水记录？
-        const daySeconds = t.dailyLog
-          ? t.dailyLog[dateStr] || 0
-          : t.createdAt.split("T")[0] === dateStr
-          ? t.duration || 0
-          : 0;
-
-        if (daySeconds > 0) {
-          taskCount++;
-          totalSeconds += daySeconds;
-
-          // 跨天结算金额的魔法
-          if (t.actualRevenue != null) {
-            const ratio = (t.duration || 0) > 0 ? daySeconds / t.duration : 1;
-            totalRevenue += Number(t.actualRevenue) * ratio;
-          } else {
-            if (t.mode !== "bounty") {
-              totalRevenue += (daySeconds / 3600) * (t.hourlyRate || 0);
-            } else if (
-              t.status === "Completed" &&
-              t.endTime &&
-              t.endTime.split("T")[0] === dateStr
-            ) {
-              totalRevenue += t.fixedReward || 0;
-            }
-          }
-        }
+      data.forEach(t => {
+         // 核心：这一天到底有没有留下汗水记录？
+         const daySeconds = t.dailyLog ? (t.dailyLog[dateStr] || 0) : (t.createdAt.split("T")[0] === dateStr ? (t.duration || 0) : 0);
+         
+         if (daySeconds > 0) {
+             taskCount++;
+             totalSeconds += daySeconds;
+             
+             // 跨天结算金额的魔法
+             if (t.actualRevenue != null) {
+                 const ratio = (t.duration || 0) > 0 ? (daySeconds / t.duration) : 1;
+                 totalRevenue += Number(t.actualRevenue) * ratio;
+             } else {
+                 if (t.mode !== 'bounty') {
+                     totalRevenue += (daySeconds / 3600) * (t.hourlyRate || 0);
+                 } else if (t.status === "Completed" && t.endTime && t.endTime.split("T")[0] === dateStr) {
+                     totalRevenue += (t.fixedReward || 0);
+                 }
+             }
+         }
       });
 
       if (taskCount === 0) return null;
@@ -547,7 +538,6 @@ const CalendarView = ({ type, data, onSelectDate }) => {
     }
   };
 
-  // 审计日历颜色
   const getReviewScoreColor = (item) => {
     if (!item) return "bg-[#0f172a]/50 border-slate-800 text-slate-600";
     const avg =
@@ -563,15 +553,14 @@ const CalendarView = ({ type, data, onSelectDate }) => {
     return "bg-rose-500/20 border-rose-500/50 text-rose-400";
   };
 
-  // 🔴 核心视觉升级：工作日历阶梯热力图 (GitHub Style)
   const getTaskScoreColor = (hours) => {
     if (!hours || hours === 0)
       return "bg-[#0f172a]/50 border-slate-800/50 text-slate-600";
     if (hours >= 8)
-      return "bg-blue-600 border-blue-400 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]"; // 满负荷发光
-    if (hours >= 5) return "bg-blue-500/60 border-blue-400/60 text-white"; // 深度工作
-    if (hours >= 2) return "bg-blue-500/30 border-blue-500/40 text-blue-100"; // 正常
-    return "bg-blue-900/30 border-blue-800/40 text-blue-300"; // 碎片时间
+      return "bg-blue-600 border-blue-400 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]"; 
+    if (hours >= 5) return "bg-blue-500/60 border-blue-400/60 text-white"; 
+    if (hours >= 2) return "bg-blue-500/30 border-blue-500/40 text-blue-100"; 
+    return "bg-blue-900/30 border-blue-800/40 text-blue-300"; 
   };
 
   return (
@@ -595,19 +584,12 @@ const CalendarView = ({ type, data, onSelectDate }) => {
         </button>
       </div>
 
-      {/* 星期表头 */}
       <div className="grid grid-cols-7 gap-2 mb-2 text-center">
         {["S", "M", "T", "W", "T", "F", "S"].map((d) => (
-          <span
-            key={d}
-            className="text-[10px] text-slate-500 font-bold uppercase"
-          >
-            {d}
-          </span>
+          <span key={d} className="text-[10px] text-slate-500 font-bold uppercase">{d}</span>
         ))}
       </div>
 
-      {/* 日历网格 */}
       <div className="grid grid-cols-7 gap-2">
         {Array.from({ length: firstDay }).map((_, i) => (
           <div key={`empty-${i}`} className="h-16"></div>
@@ -615,57 +597,47 @@ const CalendarView = ({ type, data, onSelectDate }) => {
         {Array.from({ length: daysInMonth }).map((_, i) => {
           const day = i + 1;
           const item = getDataForDay(day);
-          const isToday =
-            new Date().toDateString() ===
-            new Date(
-              currentDate.getFullYear(),
-              currentDate.getMonth(),
-              day
-            ).toDateString();
+          
+          // 判定当前格子是不是今天
+          const cellDateObj = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+          const isToday = new Date().toDateString() === cellDateObj.toDateString();
+
+          // 判定当前格子是不是“过去的日子” (不能预支未来去定罪)
+          const todayObj = new Date();
+          todayObj.setHours(0, 0, 0, 0);
+          const isPastOrToday = cellDateObj <= todayObj;
 
           const hours = item ? item.duration / 3600 : 0;
-          const colorClass =
-            type === "review"
-              ? getReviewScoreColor(item)
-              : getTaskScoreColor(hours);
+          let colorClass = type === "review" ? getReviewScoreColor(item) : getTaskScoreColor(hours);
 
-          // 🔴 核心视觉：内部注水进度条 (假设 8 小时为 100% 满状态)
-          const fillHeight =
-            type === "task" && item
-              ? `${Math.min((hours / 8) * 100, 100)}%`
-              : "0%";
+          // 🚨 核心惩罚逻辑：如果是过去的日子（或今天），并且没有任何投入时长，则显示红色警告！
+          const isZeroInvestment = type === "task" && hours === 0 && isPastOrToday;
+          if (isZeroInvestment) {
+            colorClass = "bg-rose-950/20 border-dashed border-rose-900/50 hover:border-rose-500/50 text-slate-500";
+          }
+
+          const fillHeight = type === "task" && item && hours > 0 ? `${Math.min((hours / 8) * 100, 100)}%` : "0%";
 
           return (
             <div
               key={day}
               onClick={() => {
-                const month = (currentDate.getMonth() + 1)
-                  .toString()
-                  .padStart(2, "0");
+                const month = (currentDate.getMonth() + 1).toString().padStart(2, "0");
                 const dayStr = day.toString().padStart(2, "0");
-                onSelectDate(
-                  `${currentDate.getFullYear()}-${month}-${dayStr}`,
-                  item
-                );
+                onSelectDate(`${currentDate.getFullYear()}-${month}-${dayStr}`, item);
               }}
-              className={`relative h-16 rounded-[14px] border overflow-hidden flex flex-col items-center justify-center cursor-pointer transition-all duration-300 hover:scale-[1.05] active:scale-95 ${colorClass} ${
-                isToday ? "ring-2 ring-white z-20" : ""
-              }`}
+              className={`relative h-16 rounded-[14px] border overflow-hidden flex flex-col items-center justify-center cursor-pointer transition-all duration-300 hover:scale-[1.05] active:scale-95 ${colorClass} ${isToday ? "ring-2 ring-white z-20" : ""}`}
             >
-              {/* 视觉水杯底底色 */}
-              {type === "task" && item && (
-                <div
-                  className="absolute bottom-0 left-0 w-full bg-blue-400/20 transition-all duration-500 ease-out"
-                  style={{ height: fillHeight }}
-                ></div>
+              {type === "task" && item && hours > 0 && (
+                <div className="absolute bottom-0 left-0 w-full bg-blue-400/20 transition-all duration-500 ease-out" style={{ height: fillHeight }}></div>
               )}
 
-              <span className="relative z-10 text-[11px] font-bold mb-0.5">
+              <span className={`relative z-10 text-[11px] font-bold mb-0.5 ${isZeroInvestment ? 'text-rose-500/50' : ''}`}>
                 {day}
               </span>
 
-              {/* 修复后的数据展示：金钱和时间优雅堆叠 */}
-              {type === "task" && item && (
+              {/* 正常：显示金钱和时间 */}
+              {type === "task" && item && hours > 0 && (
                 <div className="relative z-10 flex flex-col items-center">
                   <span className="text-[9px] font-mono font-bold text-emerald-400 leading-none shadow-black/50 drop-shadow-md">
                     ¥{item.totalRevenue.toFixed(0)}
@@ -675,42 +647,32 @@ const CalendarView = ({ type, data, onSelectDate }) => {
                   </span>
                 </div>
               )}
+
+              {/* 惩罚：显示零投入警告 */}
+              {isZeroInvestment && (
+                <div className="relative z-10 flex flex-col items-center mt-0.5 opacity-80">
+                  <span className="text-[8px] font-bold text-rose-500/70 leading-none tracking-widest">零投入</span>
+                  <span className="text-[7px] text-rose-500/50 leading-none mt-1 transform scale-90">纯消费</span>
+                </div>
+              )}
             </div>
           );
         })}
       </div>
 
-      {/* 底部图例说明 */}
+      {/* 底部图例 */}
       <div className="flex justify-center gap-3 mt-6 text-[9px] text-slate-400 font-bold uppercase tracking-wider">
         {type === "review" ? (
           <>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm bg-emerald-500/50 border border-emerald-500"></div>{" "}
-              巅峰
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm bg-amber-500/50 border border-amber-500"></div>{" "}
-              平常
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm bg-rose-500/50 border border-rose-500"></div>{" "}
-              低谷
-            </div>
+            <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-sm bg-emerald-500/50 border border-emerald-500"></div> 巅峰</div>
+            <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-sm bg-amber-500/50 border border-amber-500"></div> 平常</div>
+            <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-sm bg-rose-500/50 border border-rose-500"></div> 低谷</div>
           </>
         ) : (
           <>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm bg-blue-600 shadow-[0_0_5px_rgba(37,99,235,0.8)] border border-blue-400"></div>{" "}
-              极度专注 (≥8h)
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm bg-blue-500/60 border border-blue-400/60"></div>{" "}
-              深度 (≥5h)
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm bg-blue-500/30 border border-blue-500/40"></div>{" "}
-              正常
-            </div>
+            <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-sm bg-blue-600 shadow-[0_0_5px_rgba(37,99,235,0.8)] border border-blue-400"></div> 专注</div>
+            <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-sm bg-blue-500/30 border border-blue-500/40"></div> 正常</div>
+            <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-sm bg-rose-950/40 border border-rose-900 border-dashed"></div> 警示</div>
           </>
         )}
       </div>
