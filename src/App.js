@@ -498,6 +498,7 @@ const CalendarView = ({ type, data, onSelectDate }) => {
       new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1)
     );
 
+  // 🚨 核心修复：日历引擎全面接入 dailyLog 跨天日记账系统
   const getDataForDay = (day) => {
     const month = (currentDate.getMonth() + 1).toString().padStart(2, "0");
     const dayStr = day.toString().padStart(2, "0");
@@ -506,37 +507,43 @@ const CalendarView = ({ type, data, onSelectDate }) => {
     if (type === "review") {
       return data.find((r) => r.date === dateStr);
     } else {
-      const tasksForDay = data.filter((t) => {
-        const tDate = t.endTime
-          ? t.endTime.split("T")[0]
-          : t.createdAt.split("T")[0];
-        return tDate === dateStr && t.status === "Completed";
+      let totalSeconds = 0;
+      let totalRevenue = 0;
+      let taskCount = 0;
+
+      data.forEach((t) => {
+        // 核心：这一天到底有没有留下汗水记录？
+        const daySeconds = t.dailyLog
+          ? t.dailyLog[dateStr] || 0
+          : t.createdAt.split("T")[0] === dateStr
+          ? t.duration || 0
+          : 0;
+
+        if (daySeconds > 0) {
+          taskCount++;
+          totalSeconds += daySeconds;
+
+          // 跨天结算金额的魔法
+          if (t.actualRevenue != null) {
+            const ratio = (t.duration || 0) > 0 ? daySeconds / t.duration : 1;
+            totalRevenue += Number(t.actualRevenue) * ratio;
+          } else {
+            if (t.mode !== "bounty") {
+              totalRevenue += (daySeconds / 3600) * (t.hourlyRate || 0);
+            } else if (
+              t.status === "Completed" &&
+              t.endTime &&
+              t.endTime.split("T")[0] === dateStr
+            ) {
+              totalRevenue += t.fixedReward || 0;
+            }
+          }
+        }
       });
-      if (tasksForDay.length === 0) return null;
 
-      const totalSeconds = tasksForDay.reduce(
-        (acc, t) => acc + (t.duration || 0),
-        0
-      );
+      if (taskCount === 0) return null;
 
-      // 🚨 核心修复：日历必须把“实际”和“预测”加在一起算，防止数据归零隐形
-      const totalRevenue = tasksForDay.reduce((acc, t) => {
-        if (t.actualRevenue != null) return acc + Number(t.actualRevenue);
-        const isBounty = t.mode === "bounty";
-        return (
-          acc +
-          (isBounty
-            ? t.fixedReward || 0
-            : ((t.duration || 0) / 3600) * (t.hourlyRate || 0))
-        );
-      }, 0);
-
-      return {
-        count: tasksForDay.length,
-        duration: totalSeconds,
-        totalRevenue,
-        tasks: tasksForDay,
-      };
+      return { count: taskCount, duration: totalSeconds, totalRevenue };
     }
   };
 
@@ -2205,14 +2212,13 @@ const App = () => {
             </div>
             {/* ====== 顶部标题与操作栏 ====== */}
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 relative z-10 gap-4">
-              {/* 标题区域：加入日期游标指示器 */}
-              {/* 标题区域：加入日期游标与【回到今日】按钮 */}
+              {/* 标题区域：极简徽章设计 */}
               <div>
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
                   <LayoutDashboard className="text-blue-500" size={20} />
                   <span className="tracking-tight">作战看板</span>
 
-                  {/* 🔴 日期游标徽章 */}
+                  {/* 🔴 极简日期游标徽章：只显示日期，点日历切换 */}
                   <div
                     className={`ml-2 px-2 py-0.5 rounded-md border flex items-center gap-1.5 transition-all ${
                       globalDate === new Date().toISOString().split("T")[0]
@@ -2240,18 +2246,6 @@ const App = () => {
                         : globalDate}
                     </span>
                   </div>
-
-                  {/* 👇 新增：回到今日按钮 (仅在非今日时出现) 👇 */}
-                  {globalDate !== new Date().toISOString().split("T")[0] && (
-                    <button
-                      onClick={() =>
-                        setGlobalDate(new Date().toISOString().split("T")[0])
-                      }
-                      className="ml-1 px-2.5 py-1 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold transition-all active:scale-95 shadow-[0_0_10px_rgba(16,185,129,0.2)] flex items-center gap-1 animate-fade-in"
-                    >
-                      <Undo2 size={12} /> 回到今日
-                    </button>
-                  )}
                 </h2>
                 <p className="text-slate-400 text-sm mt-1">
                   "像经营公司一样经营你的人生。"
@@ -2561,6 +2555,40 @@ const App = () => {
                 icon={<CheckCircle2 size={14} />}
               />
             </div>
+
+            {/* 👇 新增：大盘项目明细列表 👇 */}
+            {overviewStats.projects.length > 0 && (
+              <div className="mb-10 bg-black/20 border border-white/5 rounded-2xl p-4">
+                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <Briefcase size={14} /> 区间项目投入排行
+                </h3>
+                <div className="space-y-3">
+                  {overviewStats.projects.map((proj, idx) => (
+                    <div
+                      key={idx}
+                      className="flex justify-between items-center group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-mono font-bold text-slate-600 w-4">
+                          {idx + 1}.
+                        </span>
+                        <span className="text-sm font-bold text-slate-200">
+                          {proj.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs font-mono">
+                        <span className="text-blue-400">
+                          {formatTime(proj.totalTime)}
+                        </span>
+                        <span className="text-emerald-500 w-16 text-right">
+                          ¥{proj.totalRev.toFixed(0)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* 原来的数据导出与安全板块 */}
             <div className="pt-6 border-t border-slate-800">
