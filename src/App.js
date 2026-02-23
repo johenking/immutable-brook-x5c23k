@@ -1227,27 +1227,39 @@ const App = () => {
     }
   }, [tasks, reviews, isLocalMode]);
 
-  // --- Timer (真·系统时间补帧版) ---
+  // --- Timer (真·系统时间补帧版 & 跨天日记账支持) ---
   useEffect(() => {
     let interval;
     if (activeTaskId) {
-      // 每次开始/恢复计时，记录下当前的真实时间戳
       lastTickRef.current = Date.now();
-
       interval = setInterval(() => {
         const now = Date.now();
-        // 计算距离上次运行，真实过去了多少秒 (比如息屏了5分钟，这里算出来就是 300)
         const deltaSeconds = Math.round((now - lastTickRef.current) / 1000);
 
         if (deltaSeconds > 0) {
+          // 🚨 获取真实的“今天”日期
+          const realTodayStr = new Date().toISOString().split("T")[0];
+
           setTasks((prev) =>
-            prev.map((t) =>
-              t.id === activeTaskId && t.status === "In Progress"
-                ? { ...t, duration: (t.duration || 0) + deltaSeconds } // 直接加上真实的差值
-                : t
-            )
+            prev.map((t) => {
+              if (t.id === activeTaskId && t.status === "In Progress") {
+                // 读取或初始化这个任务的“日记账”
+                const currentLog = t.dailyLog || {};
+                const todayLogged = currentLog[realTodayStr] || 0;
+
+                return {
+                  ...t,
+                  duration: (t.duration || 0) + deltaSeconds,
+                  // 🚨 核心：把时间精准注入到“今天”的账本里
+                  dailyLog: {
+                    ...currentLog,
+                    [realTodayStr]: todayLogged + deltaSeconds,
+                  },
+                };
+              }
+              return t;
+            })
           );
-          // 更新参考时间为当前时间
           lastTickRef.current = now;
         }
       }, 1000);
@@ -1256,7 +1268,7 @@ const App = () => {
   }, [activeTaskId]);
 
   // --- Stats (终极版：分离“当日聚焦”与“终生资产”) ---
-  const stats = useMemo(() => {
+  () => {
     // 1. 筛选出属于“游标指定日”的任务
     const dailyTasks = tasks.filter((t) => {
       const tDate = t.endTime
@@ -1267,92 +1279,71 @@ const App = () => {
 
     // ==========================================
     // A. 计算【当日】数据 (供给作战面板使用)
-    // ==========================================
-    const dailyDurationHrs =
-      dailyTasks.reduce((acc, t) => acc + (t.duration || 0), 0) / 3600;
-    let dailyActualRev = 0;
-    let dailyPredictedRev = 0;
+// =====================================================================
+  // 🌟 终极引擎 1：Stats (彻底支持跨天工时切割与实时跳动)
+  // =====================================================================
+  const stats = useMemo(() => {
+    // 🚨 筛选：不管任务哪天建的，只要在游标日 (globalDate) 有干活记录，就把它揪出来！
+    const dailyTasks = tasks.filter((t) => 
+       t.createdAt.split("T")[0] === globalDate || 
+       (t.dailyLog && t.dailyLog[globalDate] > 0)
+    );
+    
+    let dailyDurationHrs = 0;
+    let dailyActualRev = 0, dailyPredictedRev = 0;
 
-    dailyTasks.forEach((t) => {
-      if (t.status === "Completed") {
+    dailyTasks.forEach(t => {
+        // 🚨 核心：从日记账里抽取“当天”的真实耗时 (如果没有日记账，则兼容老数据的逻辑)
+        const daySeconds = t.dailyLog ? (t.dailyLog[globalDate] || 0) : (t.createdAt.split("T")[0] === globalDate ? (t.duration || 0) : 0);
+        const dayHrs = daySeconds / 3600;
+        dailyDurationHrs += dayHrs; // 累加当天的真实时间
+
         if (t.actualRevenue != null) {
-          dailyActualRev += Number(t.actualRevenue);
+            // 如果已核算(真钱)：跨天任务按“当天工时占比”瓜分总收益
+            const ratio = (t.duration || 0) > 0 ? (daySeconds / t.duration) : 1;
+            dailyActualRev += Number(t.actualRevenue) * ratio;
         } else {
-          const isBounty = t.mode === "bounty";
-          const p = isBounty
-            ? t.fixedReward || 0
-            : ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
-          dailyPredictedRev += p;
+            // 如果未核算(预测)：
+            if (t.mode === 'bounty') {
+                const isFinishedToday = t.status === "Completed" && t.endTime && t.endTime.split("T")[0] === globalDate;
+                if (isFinishedToday) dailyPredictedRev += (t.fixedReward || 0);
+            } else {
+                dailyPredictedRev += dayHrs * (t.hourlyRate || 0);
+            }
         }
-      }
     });
 
-    const dailyTotalRev = dailyActualRev + dailyPredictedRev;
-    const dailyROI =
-      dailyDurationHrs > 0 ? dailyTotalRev / dailyDurationHrs : 0;
-    const dailyDebtTasks = dailyTasks.filter((t) => {
-      const hrs = (t.duration || 0) / 3600;
-      return (
-        t.status === "Completed" &&
-        hrs > 0 &&
-        (t.actualRevenue || 0) / hrs < HOURLY_THRESHOLD
-      );
-    }).length;
-
-    // ==========================================
-    // B. 计算【终生】数据 (供给RPG等级和资产页使用)
-    // ==========================================
-    const lifetimeDurationHrs =
-      tasks.reduce((acc, t) => acc + (t.duration || 0), 0) / 3600;
-    const completedTasks = tasks.filter((t) => t.status === "Completed");
-    let lifetimeActualRev = 0;
-    let lifetimePredictedRev = 0;
-
-    completedTasks.forEach((t) => {
-      if (t.actualRevenue != null) {
-        lifetimeActualRev += Number(t.actualRevenue);
-      } else {
-        const isBounty = t.mode === "bounty";
-        const p = isBounty
-          ? t.fixedReward || 0
-          : ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
-        lifetimePredictedRev += p;
-      }
+    // 终生数据 (统计所有任务的大盘)
+    const lifetimeDurationHrs = tasks.reduce((acc, t) => acc + (t.duration || 0), 0) / 3600;
+    let lifetimeActualRev = 0, lifetimePredictedRev = 0;
+    tasks.forEach(t => {
+        if (t.actualRevenue != null) {
+            lifetimeActualRev += Number(t.actualRevenue);
+        } else {
+            if (t.mode === 'bounty') {
+               if (t.status === "Completed") lifetimePredictedRev += (t.fixedReward || 0);
+            } else {
+               lifetimePredictedRev += ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
+            }
+        }
     });
 
-    const recentReviews = reviews.slice(0, 7);
-    const avgAgency =
-      recentReviews.length > 0
-        ? (
-            recentReviews.reduce((acc, r) => acc + Number(r.agency), 0) /
-            recentReviews.length
-          ).toFixed(1)
-        : 0;
-
-    // 🔴 导出两份数据
-    return {
-      daily: {
-        durationHrs: dailyDurationHrs,
-        actualRev: dailyActualRev,
-        predictedRev: dailyPredictedRev,
-        totalRev: dailyTotalRev,
-        avgROI: dailyROI,
-        debtTasks: dailyDebtTasks,
-      },
-      lifetime: {
-        durationHrs: lifetimeDurationHrs,
-        actualRev: lifetimeActualRev,
-        predictedRev: lifetimePredictedRev,
-        totalRev: lifetimeActualRev + lifetimePredictedRev,
-      },
-      avgAgency,
+    return { 
+        daily: { 
+          durationHrs: dailyDurationHrs, actualRev: dailyActualRev, predictedRev: dailyPredictedRev, totalRev: dailyActualRev + dailyPredictedRev, 
+          avgROI: dailyDurationHrs > 0 ? (dailyActualRev + dailyPredictedRev) / dailyDurationHrs : 0, 
+          debtTasks: dailyTasks.filter(t => t.status === "Completed" && (t.duration || 0)/3600 > 0 && (t.actualRevenue || 0)/((t.duration || 0)/3600) < HOURLY_THRESHOLD).length 
+        },
+        lifetime: { durationHrs: lifetimeDurationHrs, actualRev: lifetimeActualRev, predictedRev: lifetimePredictedRev, totalRev: lifetimeActualRev + lifetimePredictedRev },
+        avgAgency: reviews.slice(0, 7).length > 0 ? (reviews.slice(0, 7).reduce((acc, r) => acc + Number(r.agency), 0) / reviews.slice(0, 7).length).toFixed(1) : 0 
     };
-  }, [tasks, reviews, globalDate]); // 👈 记得依赖项里加上 globalDate
-  // 👇👇👇 补上这段缺失的逻辑，白屏立刻就好 👇👇👇
+  }, [tasks, reviews, globalDate]);
+
+  // 👇👇👇 完美保留的缺失逻辑 (菜单与等级) 👇👇👇
   const [showUserMenu, setShowUserMenu] = useState(false); // 1. 控制菜单开关
 
   const playerStats = useMemo(() => {
-    // 2. 计算 RPG 等级
+    // 2. 计算 RPG 等级 (🚨 修复了依赖项，现在按终生时间计算 XP)
     const totalXP = Math.floor(stats.lifetime.durationHrs * 60);
     const level = Math.floor(totalXP / 1000) + 1;
     const currentLevelXP = totalXP % 1000;
@@ -1366,19 +1357,38 @@ const App = () => {
     if (level >= 20) title = "主宰";
 
     return { totalXP, level, currentLevelXP, nextLevelXP, progress, title };
-  }, [stats.totalDurationHrs]);
+  }, [stats.lifetime.durationHrs]); // 👈 依赖项已经安全修复
+
+  // =====================================================================
+  // 🌟 终极引擎 2：groupedTasks (让跨天任务也在当天的列表里现身)
+  // =====================================================================
   const groupedTasks = useMemo(() => {
     const groups = {};
-    tasks.forEach((task) => {
+    // 同样，把在今天留下过汗水(时间记录)的任务筛选出来
+    const dailyTasks = tasks.filter((t) => 
+       t.createdAt.split("T")[0] === globalDate || 
+       (t.dailyLog && t.dailyLog[globalDate] > 0)
+    );
+    
+    dailyTasks.forEach((task) => {
       const p = task.project || "默认项目";
-      if (!groups[p])
-        groups[p] = { name: p, tasks: [], totalTime: 0, totalRev: 0 };
+      if (!groups[p]) groups[p] = { name: p, tasks: [], totalTime: 0, totalRev: 0 };
       groups[p].tasks.push(task);
-      groups[p].totalTime += task.duration || 0;
-      groups[p].totalRev += task.actualRevenue || 0;
+      
+      // 提取它在“今天”耗费的时间和赚的钱，加到组统计里
+      const daySeconds = task.dailyLog ? (task.dailyLog[globalDate] || 0) : (task.createdAt.split("T")[0] === globalDate ? (task.duration || 0) : 0);
+      groups[p].totalTime += daySeconds;
+      
+      if (task.actualRevenue != null) {
+          const ratio = (task.duration || 0) > 0 ? (daySeconds / task.duration) : 1;
+          groups[p].totalRev += Number(task.actualRevenue) * ratio;
+      } else {
+          if (task.mode !== 'bounty') groups[p].totalRev += (daySeconds / 3600) * (task.hourlyRate || 0);
+          else if (task.status === "Completed" && task.endTime && task.endTime.split("T")[0] === globalDate) groups[p].totalRev += (task.fixedReward || 0);
+      }
     });
     return Object.values(groups).sort((a, b) => b.totalTime - a.totalTime);
-  }, [tasks]);
+  }, [tasks, globalDate]);
 
   const uniqueProjects = useMemo(
     () => [...new Set(tasks.map((t) => t.project || "默认项目"))],
@@ -1487,22 +1497,28 @@ const App = () => {
       updates.actualRevenue = payload === null ? null : Number(payload);
     }
 
-    // --- 动作 6: 补录/调整时间 (调整时间时不破坏预测状态) ---
+    // --- 动作 6: 补录/调整时间 (跨天账本精准写入) ---
     if (action === "adjust") {
-      const currentDuration = task.duration || 0;
+      const addedSeconds = Number(payload.addMinutes) * 60;
 
-      // 1. 计算新的总时长
-      const newDuration = currentDuration + Number(payload.addMinutes) * 60;
-      updates.duration = newDuration;
+      // 1. 更新任务的总时长 (为了算总进度)
+      updates.duration = (task.duration || 0) + addedSeconds;
 
-      // 🚨 核心修复 4：除非你在补录时间的同时追加了实打实的金额，否则不碰 actualRevenue！
+      // 2. 🚨 核心魔法：把时间精准注入到当前游标日 (globalDate)
+      const currentLog = task.dailyLog || {};
+      const targetDateLog = currentLog[globalDate] || 0;
+      updates.dailyLog = {
+        ...currentLog,
+        [globalDate]: targetDateLog + addedSeconds,
+      };
+
+      // 3. 只有手动填了钱，才更新实际收益 (保持预测模式)
       if (Number(payload.addRevenue) > 0) {
         updates.actualRevenue =
           (task.actualRevenue || 0) + Number(payload.addRevenue);
       }
-      // （删除了自作聪明重算 actualRevenue 的逻辑，让卡片去实时预测）
 
-      // 3. 状态处理
+      // 4. 状态处理
       if (payload.shouldStart) {
         updates.status = "In Progress";
         setActiveTaskId(taskId);
@@ -1583,6 +1599,18 @@ const App = () => {
       title: newTask.title || "快速记录",
       project: finalProject,
       createdAt: finalDate,
+      mode: newTask.mode || "stream",
+      xpType: newTask.xpType || "work",
+      expMult: multiplier,
+      hourlyRate: newTask.mode === "bounty" ? 0 : Number(newTask.estValue),
+      fixedReward: newTask.mode === "bounty" ? Number(newTask.estValue) : 0,
+      duration: Number(newTask.manualDurationMinutes) * 60,
+
+      // 🚨 核心修复：建立日记账，补录的时间直接记入指定的日期
+      dailyLog: {
+        [finalDate.split("T")[0]]: Number(newTask.manualDurationMinutes) * 60,
+      },
+      actualRevenue: null,
 
       // --- RPG 新属性 ---
       mode: newTask.mode || "stream", // 'stream' (计时) or 'bounty' (悬赏)
