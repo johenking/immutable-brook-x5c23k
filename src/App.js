@@ -1061,6 +1061,7 @@ const App = () => {
   const [globalDate, setGlobalDate] = useState(
     new Date().toISOString().split("T")[0]
   );
+  const [overviewRange, setOverviewRange] = useState("all");
   // Modals & Views
   const [showAddModal, setShowAddModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
@@ -1432,6 +1433,60 @@ const App = () => {
     return Object.values(groups).sort((a, b) => b.totalTime - a.totalTime);
   }, [tasks, globalDate]);
 
+  // =====================================================================
+  // 🌟 终极引擎 3：大盘统计 (Overview Stats - 支持多时间维度)
+  // =====================================================================
+  const overviewStats = useMemo(() => {
+    const now = new Date();
+    const cutoff = new Date();
+
+    // 1. 根据选中区间，设定时间分界线
+    if (overviewRange === "7d") cutoff.setDate(now.getDate() - 7);
+    else if (overviewRange === "30d") cutoff.setDate(now.getDate() - 30);
+    else if (overviewRange === "year")
+      cutoff.setFullYear(now.getFullYear() - 1);
+
+    // 2. 过滤出该区间内的任务
+    const filteredTasks = tasks.filter((t) => {
+      if (overviewRange === "all") return true;
+      return new Date(t.createdAt) >= cutoff;
+    });
+
+    let totalDurationHrs = 0;
+    let actualRev = 0;
+    let predictedRev = 0;
+    let completedCount = 0;
+
+    filteredTasks.forEach((t) => {
+      totalDurationHrs += (t.duration || 0) / 3600;
+
+      if (t.status === "Completed") {
+        completedCount++;
+        if (t.actualRevenue != null) {
+          actualRev += Number(t.actualRevenue);
+        } else {
+          if (t.mode === "bounty") predictedRev += t.fixedReward || 0;
+          else predictedRev += ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
+        }
+      } else {
+        // 进行中/暂停的任务，也算预测收益 (仅限计时模式)
+        if (t.mode !== "bounty")
+          predictedRev += ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
+      }
+    });
+
+    const totalRev = actualRev + predictedRev;
+    const avgROI = totalDurationHrs > 0 ? totalRev / totalDurationHrs : 0;
+
+    return {
+      durationHrs: totalDurationHrs,
+      actualRev,
+      predictedRev,
+      avgROI,
+      completedCount,
+    };
+  }, [tasks, overviewRange]);
+
   const uniqueProjects = useMemo(
     () => [...new Set(tasks.map((t) => t.project || "默认项目"))],
     [tasks]
@@ -1714,7 +1769,7 @@ const App = () => {
     setTargetDate(null);
   };
 
-  // 👇👇👇 这是新加的函数，专门处理日历点击 👇👇👇
+  // 👇👇👇 极致精简的日历点击事件 (纯粹的时光穿梭) 👇👇👇
   const handleCalendarDateSelect = (dateStr, dayData) => {
     const todayStr = new Date().toISOString().split("T")[0];
 
@@ -1724,16 +1779,11 @@ const App = () => {
       return;
     }
 
-    setTargetDate(dateStr); // 🟢 关键：把系统锁定在你点击的那一天
+    // 2. 核心魔法：拨动全局时间游标到你点击的这一天
+    setGlobalDate(dateStr);
 
-    if (!dayData || dayData.count === 0) {
-      // 2. 如果当天没数据 -> 系统认为你想补录 -> 自动切到手动模式 -> 弹窗
-      setIsManualEntry(true);
-      setShowAddModal(true);
-    } else {
-      // 3. 如果当天有数据 -> 打开日报
-      openDailyReport(dateStr, dayData);
-    }
+    // 3. 瞬间把视图切换回“作战列表”，拒绝一切多余弹窗！
+    setTaskViewMode("list");
   };
 
   const openReviewForDate = (dateStr) => {
@@ -1905,15 +1955,25 @@ const App = () => {
           {/* md:flex 表示在大于 iPad 宽度的屏幕上显示，absolute 绝对居中 */}
           <div className="hidden md:flex items-center gap-10 absolute left-1/2 -translate-x-1/2">
             <button
-              onClick={() => setActiveTab("execution")}
-              className={`text-sm font-bold flex items-center gap-2 transition-all ${
-                activeTab === "execution"
-                  ? "text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.6)]"
-                  : "text-slate-500 hover:text-slate-300"
-              }`}
+              onClick={() => {
+                const todayStr = new Date().toISOString().split("T")[0];
+                if (globalDate !== todayStr) {
+                  // 🚨 智能判断：如果游标在过去，点击加号直接进入该日的【补录模式】
+                  setTargetDate(globalDate);
+                  setIsManualEntry(true);
+                } else {
+                  // 如果游标在今天，正常进入【实时新建模式】
+                  setTargetDate(null);
+                  setIsManualEntry(false);
+                }
+                setShowAddModal(true);
+              }}
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg hover:scale-105 active:scale-95 transition-all"
             >
-              <LayoutDashboard size={18} /> 作战
+              <Plus size={18} />
+              <span className="hidden md:inline">投入新项目</span>
             </button>
+
             <button
               onClick={() => setActiveTab("audit")}
               className={`text-sm font-bold flex items-center gap-2 transition-all ${
@@ -2146,20 +2206,52 @@ const App = () => {
             {/* ====== 顶部标题与操作栏 ====== */}
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 relative z-10 gap-4">
               {/* 标题区域：加入日期游标指示器 */}
+              {/* 标题区域：加入日期游标与【回到今日】按钮 */}
               <div>
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
                   <LayoutDashboard className="text-blue-500" size={20} />
                   <span className="tracking-tight">作战看板</span>
 
-                  {/* 🔴 这里就是新增的炫酷日期游标徽章 */}
-                  <div className="ml-2 px-2 py-0.5 rounded-md bg-blue-500/20 border border-blue-500/30 flex items-center gap-1.5 shadow-[0_0_10px_rgba(59,130,246,0.2)] transition-all">
-                    <CalendarIcon size={12} className="text-blue-400" />
-                    <span className="text-[11px] font-mono font-bold text-blue-300 tracking-wider">
+                  {/* 🔴 日期游标徽章 */}
+                  <div
+                    className={`ml-2 px-2 py-0.5 rounded-md border flex items-center gap-1.5 transition-all ${
+                      globalDate === new Date().toISOString().split("T")[0]
+                        ? "bg-blue-500/20 border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.2)]"
+                        : "bg-slate-800/80 border-slate-700"
+                    }`}
+                  >
+                    <CalendarIcon
+                      size={12}
+                      className={
+                        globalDate === new Date().toISOString().split("T")[0]
+                          ? "text-blue-400"
+                          : "text-slate-400"
+                      }
+                    />
+                    <span
+                      className={`text-[11px] font-mono font-bold tracking-wider ${
+                        globalDate === new Date().toISOString().split("T")[0]
+                          ? "text-blue-300"
+                          : "text-slate-300"
+                      }`}
+                    >
                       {globalDate === new Date().toISOString().split("T")[0]
                         ? "今日实时"
                         : globalDate}
                     </span>
                   </div>
+
+                  {/* 👇 新增：回到今日按钮 (仅在非今日时出现) 👇 */}
+                  {globalDate !== new Date().toISOString().split("T")[0] && (
+                    <button
+                      onClick={() =>
+                        setGlobalDate(new Date().toISOString().split("T")[0])
+                      }
+                      className="ml-1 px-2.5 py-1 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold transition-all active:scale-95 shadow-[0_0_10px_rgba(16,185,129,0.2)] flex items-center gap-1 animate-fade-in"
+                    >
+                      <Undo2 size={12} /> 回到今日
+                    </button>
+                  )}
                 </h2>
                 <p className="text-slate-400 text-sm mt-1">
                   "像经营公司一样经营你的人生。"
@@ -2381,52 +2473,140 @@ const App = () => {
             )}
           </section>
         )}
-
-        {/* === Tab 3: Assets (新增的资产板块) === */}
+        {/* === Tab 3: 大盘与资产 (Analytics & Assets) === */}
         {activeTab === "assets" && (
           <section className="bg-white/5 border border-white/10 rounded-3xl p-6 animate-fade-in">
-            <h2 className="text-2xl font-bold text-white flex items-center gap-2 mb-6">
-              <ShieldCheck className="text-slate-400" size={20} /> 资产与数据
-            </h2>
-            <div className="space-y-4">
-              <div className="bg-black/40 p-4 rounded-xl border border-white/5 flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-white flex items-center gap-2">
-                    <Database size={16} className="text-blue-500" /> JSON
-                    数据导出
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1">
-                    将所有人生数据打包下载，确保数据主权。
-                  </div>
-                </div>
-                {/* 这里的 handleExportJSON 就是你刚才在第4步加的那个函数 */}
-                <button
-                  onClick={handleExportJSON}
-                  className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 hover:text-white transition-colors"
-                >
-                  <Download size={18} />
-                </button>
-              </div>
-              <div className="bg-black/40 p-4 rounded-xl border border-white/5 flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-white">账户状态</div>
-                  <div className="text-xs text-slate-500 mt-1">
-                    {isLocalMode
-                      ? "离线模式 (数据存储在浏览器)"
-                      : `已同步云端 (${user.email || "Google User"})`}
-                  </div>
-                </div>
-                {isLocalMode && (
+            {/* 顶部标题与时间筛选器 */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+              <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                <BarChart2 className="text-purple-500" size={24} /> 数据大盘
+              </h2>
+
+              {/* 🔴 苹果原生感的时间区间选择器 */}
+              <div className="flex bg-black/40 p-1 rounded-xl border border-white/10 w-fit shadow-inner">
+                {[
+                  { id: "7d", label: "近 7 天" },
+                  { id: "30d", label: "近 30 天" },
+                  { id: "year", label: "近 1 年" },
+                  { id: "all", label: "全部生涯" },
+                ].map((r) => (
                   <button
-                    onClick={() => {
-                      setUser(null);
-                      setIsLocalMode(false);
-                    }}
-                    className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg"
+                    key={r.id}
+                    onClick={() => setOverviewRange(r.id)}
+                    className={`px-4 py-2 rounded-lg text-xs font-bold transition-all duration-300 ${
+                      overviewRange === r.id
+                        ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-900/50"
+                        : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
+                    }`}
                   >
-                    去登录同步
+                    {r.label}
                   </button>
-                )}
+                ))}
+              </div>
+            </div>
+
+            {/* 🔴 大盘四大核心看板 */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-10">
+              <StatBox
+                label="区间总营收 (落袋)"
+                prefix="¥"
+                value={overviewStats.actualRev.toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+                unit=""
+                color="text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)]"
+                icon={<DollarSign size={14} />}
+                subNode={
+                  <div className="text-[10px] text-emerald-400 font-mono font-bold flex items-center gap-1 bg-emerald-500/10 w-fit px-1.5 py-0.5 rounded border border-emerald-500/20">
+                    +¥
+                    {overviewStats.predictedRev.toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{" "}
+                    预测
+                  </div>
+                }
+              />
+
+              <StatBox
+                label="区间总时长"
+                prefix=""
+                value={overviewStats.durationHrs.toFixed(1)}
+                unit="h"
+                color="text-blue-400 drop-shadow-[0_0_10px_rgba(59,130,246,0.3)]"
+                icon={<Clock size={14} />}
+              />
+
+              <StatBox
+                label="区间平均时薪"
+                prefix="¥"
+                value={overviewStats.avgROI.toFixed(0)}
+                unit="/h"
+                color={
+                  overviewStats.avgROI < HOURLY_THRESHOLD &&
+                  overviewStats.durationHrs > 0
+                    ? "text-rose-400 drop-shadow-[0_0_10px_rgba(244,63,94,0.3)]"
+                    : "text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.3)]"
+                }
+                icon={<TrendingUp size={14} />}
+              />
+
+              <StatBox
+                label="完成任务数"
+                prefix=""
+                value={overviewStats.completedCount}
+                unit="个"
+                color="text-purple-400 drop-shadow-[0_0_10px_rgba(168,85,247,0.3)]"
+                icon={<CheckCircle2 size={14} />}
+              />
+            </div>
+
+            {/* 原来的数据导出与安全板块 */}
+            <div className="pt-6 border-t border-slate-800">
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                <ShieldCheck size={14} /> 数据资产与安全
+              </h3>
+              <div className="space-y-3">
+                <div className="bg-black/40 p-4 rounded-xl border border-white/5 flex items-center justify-between hover:bg-white/5 transition-colors">
+                  <div>
+                    <div className="font-bold text-white flex items-center gap-2 text-sm">
+                      <Database size={16} className="text-blue-500" /> 导出 JSON
+                      档案
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-1">
+                      将所有人生数据打包下载，确保数据主权。
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleExportJSON}
+                    className="p-3 bg-slate-800 hover:bg-blue-600 rounded-xl text-slate-300 hover:text-white transition-all active:scale-90 shadow-lg"
+                  >
+                    <Download size={16} />
+                  </button>
+                </div>
+
+                <div className="bg-black/40 p-4 rounded-xl border border-white/5 flex items-center justify-between">
+                  <div>
+                    <div className="font-bold text-white text-sm">账户状态</div>
+                    <div className="text-[10px] text-slate-500 mt-1">
+                      {isLocalMode
+                        ? "离线模式 (数据存储在浏览器)"
+                        : `已同步云端 (${user.email || "Google User"})`}
+                    </div>
+                  </div>
+                  {isLocalMode && (
+                    <button
+                      onClick={() => {
+                        setUser(null);
+                        setIsLocalMode(false);
+                      }}
+                      className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg active:scale-95"
+                    >
+                      去登录同步
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </section>
@@ -2860,112 +3040,6 @@ const App = () => {
                   )}
                 </button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Daily Report Modal (New Feature) */}
-      {showDailyReportModal && reportData && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-fade-in"
-          onClick={() => setShowDailyReportModal(false)}
-        >
-          <div
-            className="bg-[#0f172a] border border-slate-800 p-6 rounded-3xl max-w-sm w-full shadow-2xl animate-slide-up max-h-[85vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-lg">
-                  {reportDate.split("-")[2]}
-                </div>
-                <div>
-                  <h3 className="font-bold text-white text-lg">单日战报</h3>
-                  <p className="text-slate-500 text-xs font-mono">
-                    {reportDate}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowDailyReportModal(false)}
-                className="p-2 bg-slate-800 rounded-full text-slate-400 hover:text-white"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 mb-6">
-              <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl">
-                <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">
-                  当日投入
-                </div>
-                <div className="font-mono text-white text-lg font-bold">
-                  {(reportData.duration / 3600).toFixed(1)}h
-                </div>
-              </div>
-              <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl">
-                <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">
-                  当日产出
-                </div>
-                <div className="font-mono text-emerald-400 text-lg font-bold">
-                  ¥
-                  {reportData.tasks.reduce(
-                    (acc, t) => acc + (t.actualRevenue || 0),
-                    (0).toFixed(2)
-                  )}
-                </div>
-              </div>
-            </div>
-            {/* 👇👇👇 [新增] 一键补录按钮 👇👇👇 */}
-            <button
-              onClick={() => {
-                setShowDailyReportModal(false); // 关闭战报
-                setTargetDate(reportDate); // 🟢 关键：锁定战报显示的日期
-                setIsManualEntry(true); // 开启手动模式
-                setShowAddModal(true); // 打开输入弹窗
-              }}
-              className="w-full py-3 mb-4 bg-white/5 border border-dashed border-slate-700 hover:bg-blue-600/10 hover:border-blue-500/50 hover:text-blue-400 text-slate-500 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
-            >
-              <Plus size={14} /> 补录 {reportDate} 的任务
-            </button>
-
-            <div className="space-y-3">
-              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">
-                时间轴
-              </h4>
-              {reportData.tasks.length === 0 ? (
-                <p className="text-slate-600 text-xs italic text-center py-4">
-                  当日无战斗记录
-                </p>
-              ) : (
-                reportData.tasks.map((task) => (
-                  <div key={task.id} className="flex gap-3 relative group">
-                    <div className="flex flex-col items-center">
-                      <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5"></div>
-                      <div className="w-px h-full bg-slate-800 my-1 group-last:hidden"></div>
-                    </div>
-                    <div className="pb-4">
-                      <div className="text-sm text-white font-medium">
-                        {task.title}
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">
-                          {task.project}
-                        </span>
-                        <span className="text-[10px] font-mono text-slate-500">
-                          {formatTime(task.duration)}
-                        </span>
-                        {task.actualRevenue > 0 && (
-                          <span className="text-[10px] font-mono text-emerald-500">
-                            +¥{Number(task.actualRevenue).toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
             </div>
           </div>
         </div>
