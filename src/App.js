@@ -1268,784 +1268,921 @@ const App = () => {
   }, [activeTaskId]);
 
   // --- Stats (终极版：分离“当日聚焦”与“终生资产”) ---
-  () => {
-    // 1. 筛选出属于“游标指定日”的任务
-    const dailyTasks = tasks.filter((t) => {
-      const tDate = t.endTime
-        ? t.endTime.split("T")[0]
-        : t.createdAt.split("T")[0];
-      return tDate === globalDate;
-    });
 
-    // ==========================================
-    // A. 计算【当日】数据 (供给作战面板使用)
-    // =====================================================================
-    // 🌟 终极引擎 1：Stats (彻底支持跨天工时切割与实时跳动)
-    // =====================================================================
-    const stats = useMemo(() => {
-      // 🚨 筛选：不管任务哪天建的，只要在游标日 (globalDate) 有干活记录，就把它揪出来！
-      const dailyTasks = tasks.filter(
-        (t) =>
-          t.createdAt.split("T")[0] === globalDate ||
-          (t.dailyLog && t.dailyLog[globalDate] > 0)
-      );
-
-      let dailyDurationHrs = 0;
-      let dailyActualRev = 0,
-        dailyPredictedRev = 0;
-
-      dailyTasks.forEach((t) => {
-        // 🚨 核心：从日记账里抽取“当天”的真实耗时 (如果没有日记账，则兼容老数据的逻辑)
-        const daySeconds = t.dailyLog
-          ? t.dailyLog[globalDate] || 0
-          : t.createdAt.split("T")[0] === globalDate
-          ? t.duration || 0
-          : 0;
-        const dayHrs = daySeconds / 3600;
-        dailyDurationHrs += dayHrs; // 累加当天的真实时间
-
-        if (t.actualRevenue != null) {
-          // 如果已核算(真钱)：跨天任务按“当天工时占比”瓜分总收益
-          const ratio = (t.duration || 0) > 0 ? daySeconds / t.duration : 1;
-          dailyActualRev += Number(t.actualRevenue) * ratio;
-        } else {
-          // 如果未核算(预测)：
-          if (t.mode === "bounty") {
-            const isFinishedToday =
-              t.status === "Completed" &&
-              t.endTime &&
-              t.endTime.split("T")[0] === globalDate;
-            if (isFinishedToday) dailyPredictedRev += t.fixedReward || 0;
-          } else {
-            dailyPredictedRev += dayHrs * (t.hourlyRate || 0);
-          }
-        }
-      });
-
-      // 终生数据 (统计所有任务的大盘)
-      const lifetimeDurationHrs =
-        tasks.reduce((acc, t) => acc + (t.duration || 0), 0) / 3600;
-      let lifetimeActualRev = 0,
-        lifetimePredictedRev = 0;
-      tasks.forEach((t) => {
-        if (t.actualRevenue != null) {
-          lifetimeActualRev += Number(t.actualRevenue);
-        } else {
-          if (t.mode === "bounty") {
-            if (t.status === "Completed")
-              lifetimePredictedRev += t.fixedReward || 0;
-          } else {
-            lifetimePredictedRev +=
-              ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
-          }
-        }
-      });
-
-      return {
-        daily: {
-          durationHrs: dailyDurationHrs,
-          actualRev: dailyActualRev,
-          predictedRev: dailyPredictedRev,
-          totalRev: dailyActualRev + dailyPredictedRev,
-          avgROI:
-            dailyDurationHrs > 0
-              ? (dailyActualRev + dailyPredictedRev) / dailyDurationHrs
-              : 0,
-          debtTasks: dailyTasks.filter(
-            (t) =>
-              t.status === "Completed" &&
-              (t.duration || 0) / 3600 > 0 &&
-              (t.actualRevenue || 0) / ((t.duration || 0) / 3600) <
-                HOURLY_THRESHOLD
-          ).length,
-        },
-        lifetime: {
-          durationHrs: lifetimeDurationHrs,
-          actualRev: lifetimeActualRev,
-          predictedRev: lifetimePredictedRev,
-          totalRev: lifetimeActualRev + lifetimePredictedRev,
-        },
-        avgAgency:
-          reviews.slice(0, 7).length > 0
-            ? (
-                reviews
-                  .slice(0, 7)
-                  .reduce((acc, r) => acc + Number(r.agency), 0) /
-                reviews.slice(0, 7).length
-              ).toFixed(1)
-            : 0,
-      };
-    }, [tasks, reviews, globalDate]);
-
-    // 👇👇👇 完美保留的缺失逻辑 (菜单与等级) 👇👇👇
-    const [showUserMenu, setShowUserMenu] = useState(false); // 1. 控制菜单开关
-
-    const playerStats = useMemo(() => {
-      // 2. 计算 RPG 等级 (🚨 修复了依赖项，现在按终生时间计算 XP)
-      const totalXP = Math.floor(stats.lifetime.durationHrs * 60);
-      const level = Math.floor(totalXP / 1000) + 1;
-      const currentLevelXP = totalXP % 1000;
-      const nextLevelXP = 1000;
-      const progress = (currentLevelXP / nextLevelXP) * 100;
-
-      let title = "见习者";
-      if (level >= 3) title = "修行者";
-      if (level >= 5) title = "觉醒者";
-      if (level >= 10) title = "破局者";
-      if (level >= 20) title = "主宰";
-
-      return { totalXP, level, currentLevelXP, nextLevelXP, progress, title };
-    }, [stats.lifetime.durationHrs]); // 👈 依赖项已经安全修复
-
-    // =====================================================================
-    // 🌟 终极引擎 2：groupedTasks (让跨天任务也在当天的列表里现身)
-    // =====================================================================
-    const groupedTasks = useMemo(() => {
-      const groups = {};
-      // 同样，把在今天留下过汗水(时间记录)的任务筛选出来
-      const dailyTasks = tasks.filter(
-        (t) =>
-          t.createdAt.split("T")[0] === globalDate ||
-          (t.dailyLog && t.dailyLog[globalDate] > 0)
-      );
-
-      dailyTasks.forEach((task) => {
-        const p = task.project || "默认项目";
-        if (!groups[p])
-          groups[p] = { name: p, tasks: [], totalTime: 0, totalRev: 0 };
-        groups[p].tasks.push(task);
-
-        // 提取它在“今天”耗费的时间和赚的钱，加到组统计里
-        const daySeconds = task.dailyLog
-          ? task.dailyLog[globalDate] || 0
-          : task.createdAt.split("T")[0] === globalDate
-          ? task.duration || 0
-          : 0;
-        groups[p].totalTime += daySeconds;
-
-        if (task.actualRevenue != null) {
-          const ratio =
-            (task.duration || 0) > 0 ? daySeconds / task.duration : 1;
-          groups[p].totalRev += Number(task.actualRevenue) * ratio;
-        } else {
-          if (task.mode !== "bounty")
-            groups[p].totalRev += (daySeconds / 3600) * (task.hourlyRate || 0);
-          else if (
-            task.status === "Completed" &&
-            task.endTime &&
-            task.endTime.split("T")[0] === globalDate
-          )
-            groups[p].totalRev += task.fixedReward || 0;
-        }
-      });
-      return Object.values(groups).sort((a, b) => b.totalTime - a.totalTime);
-    }, [tasks, globalDate]);
-
-    const uniqueProjects = useMemo(
-      () => [...new Set(tasks.map((t) => t.project || "默认项目"))],
-      [tasks]
+  // ==========================================
+  // A. 计算【当日】数据 (供给作战面板使用)
+  // =====================================================================
+  // 🌟 终极引擎 1：Stats (彻底支持跨天工时切割与实时跳动)
+  // =====================================================================
+  const stats = useMemo(() => {
+    // 🚨 筛选：不管任务哪天建的，只要在游标日 (globalDate) 有干活记录，就把它揪出来！
+    const dailyTasks = tasks.filter(
+      (t) =>
+        t.createdAt.split("T")[0] === globalDate ||
+        (t.dailyLog && t.dailyLog[globalDate] > 0)
     );
 
-    // --- Actions ---
-    const updateLocalTask = (taskId, updates) => {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t))
-      );
-    };
-    // 🟢【插入这个新函数】
-    const handleExportJSON = () => {
-      // 打包所有数据
-      const data = {
-        user: user?.uid,
-        exportedAt: new Date().toISOString(),
-        stats,
-        tasks,
-        reviews,
-      };
-      // 创建下载链接并自动点击
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `life-system-backup-${
-        new Date().toISOString().split("T")[0]
-      }.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    };
+    let dailyDurationHrs = 0;
+    let dailyActualRev = 0,
+      dailyPredictedRev = 0;
 
-    // 👇👇👇 最终修复版 handleTaskAction (暂停、完成均强制存档，拒绝清零) 👇👇👇
-    const handleTaskAction = async (action, taskId, payload = null) => {
-      if (!user) return;
+    dailyTasks.forEach((t) => {
+      // 🚨 核心：从日记账里抽取“当天”的真实耗时 (如果没有日记账，则兼容老数据的逻辑)
+      const daySeconds = t.dailyLog
+        ? t.dailyLog[globalDate] || 0
+        : t.createdAt.split("T")[0] === globalDate
+        ? t.duration || 0
+        : 0;
+      const dayHrs = daySeconds / 3600;
+      dailyDurationHrs += dayHrs; // 累加当天的真实时间
 
-      // 1. 获取当前内存中的最新任务状态 (包含刚刚跑出来的 duration)
-      const task = tasks.find((t) => t.id === taskId);
-      if (!task) return;
-
-      const updates = {};
-
-      // --- 动作 1: 开始/暂停 (Toggle) ---
-      if (action === "toggle") {
-        if (activeTaskId === taskId) {
-          // 🛑 情况 A: 正在进行 -> 暂停
-          setActiveTaskId(null);
-          updates.status = "Pending";
-
-          // 🚨🚨🚨 核心修复：暂停时也要存档！🚨🚨🚨
-          // 把内存里的时间写入数据库，防止被云端旧数据覆盖
-          updates.duration = task.duration || 0;
+      if (t.actualRevenue != null) {
+        // 如果已核算(真钱)：跨天任务按“当天工时占比”瓜分总收益
+        const ratio = (t.duration || 0) > 0 ? daySeconds / t.duration : 1;
+        dailyActualRev += Number(t.actualRevenue) * ratio;
+      } else {
+        // 如果未核算(预测)：
+        if (t.mode === "bounty") {
+          const isFinishedToday =
+            t.status === "Completed" &&
+            t.endTime &&
+            t.endTime.split("T")[0] === globalDate;
+          if (isFinishedToday) dailyPredictedRev += t.fixedReward || 0;
         } else {
-          // ▶️ 情况 B: 暂停/未开始 -> 开始
-          setActiveTaskId(taskId);
-          updates.status = "In Progress";
+          dailyPredictedRev += dayHrs * (t.hourlyRate || 0);
         }
       }
+    });
 
-      // --- 动作 2: 完成任务 (Complete) ---
-      if (action === "complete") {
-        if (activeTaskId === taskId) setActiveTaskId(null); // 停止计时
-        updates.status = "Completed";
-        updates.endTime = new Date().toISOString();
+    // 终生数据 (统计所有任务的大盘)
+    const lifetimeDurationHrs =
+      tasks.reduce((acc, t) => acc + (t.duration || 0), 0) / 3600;
+    let lifetimeActualRev = 0,
+      lifetimePredictedRev = 0;
+    tasks.forEach((t) => {
+      if (t.actualRevenue != null) {
+        lifetimeActualRev += Number(t.actualRevenue);
+      } else {
+        if (t.mode === "bounty") {
+          if (t.status === "Completed")
+            lifetimePredictedRev += t.fixedReward || 0;
+        } else {
+          lifetimePredictedRev +=
+            ((t.duration || 0) / 3600) * (t.hourlyRate || 0);
+        }
+      }
+    });
 
+    return {
+      daily: {
+        durationHrs: dailyDurationHrs,
+        actualRev: dailyActualRev,
+        predictedRev: dailyPredictedRev,
+        totalRev: dailyActualRev + dailyPredictedRev,
+        avgROI:
+          dailyDurationHrs > 0
+            ? (dailyActualRev + dailyPredictedRev) / dailyDurationHrs
+            : 0,
+        debtTasks: dailyTasks.filter(
+          (t) =>
+            t.status === "Completed" &&
+            (t.duration || 0) / 3600 > 0 &&
+            (t.actualRevenue || 0) / ((t.duration || 0) / 3600) <
+              HOURLY_THRESHOLD
+        ).length,
+      },
+      lifetime: {
+        durationHrs: lifetimeDurationHrs,
+        actualRev: lifetimeActualRev,
+        predictedRev: lifetimePredictedRev,
+        totalRev: lifetimeActualRev + lifetimePredictedRev,
+      },
+      avgAgency:
+        reviews.slice(0, 7).length > 0
+          ? (
+              reviews
+                .slice(0, 7)
+                .reduce((acc, r) => acc + Number(r.agency), 0) /
+              reviews.slice(0, 7).length
+            ).toFixed(1)
+          : 0,
+    };
+  }, [tasks, reviews, globalDate]);
+
+  // 👇👇👇 完美保留的缺失逻辑 (菜单与等级) 👇👇👇
+  const [showUserMenu, setShowUserMenu] = useState(false); // 1. 控制菜单开关
+
+  const playerStats = useMemo(() => {
+    // 2. 计算 RPG 等级 (🚨 修复了依赖项，现在按终生时间计算 XP)
+    const totalXP = Math.floor(stats.lifetime.durationHrs * 60);
+    const level = Math.floor(totalXP / 1000) + 1;
+    const currentLevelXP = totalXP % 1000;
+    const nextLevelXP = 1000;
+    const progress = (currentLevelXP / nextLevelXP) * 100;
+
+    let title = "见习者";
+    if (level >= 3) title = "修行者";
+    if (level >= 5) title = "觉醒者";
+    if (level >= 10) title = "破局者";
+    if (level >= 20) title = "主宰";
+
+    return { totalXP, level, currentLevelXP, nextLevelXP, progress, title };
+  }, [stats.lifetime.durationHrs]); // 👈 依赖项已经安全修复
+
+  // =====================================================================
+  // 🌟 终极引擎 2：groupedTasks (让跨天任务也在当天的列表里现身)
+  // =====================================================================
+  const groupedTasks = useMemo(() => {
+    const groups = {};
+    // 同样，把在今天留下过汗水(时间记录)的任务筛选出来
+    const dailyTasks = tasks.filter(
+      (t) =>
+        t.createdAt.split("T")[0] === globalDate ||
+        (t.dailyLog && t.dailyLog[globalDate] > 0)
+    );
+
+    dailyTasks.forEach((task) => {
+      const p = task.project || "默认项目";
+      if (!groups[p])
+        groups[p] = { name: p, tasks: [], totalTime: 0, totalRev: 0 };
+      groups[p].tasks.push(task);
+
+      // 提取它在“今天”耗费的时间和赚的钱，加到组统计里
+      const daySeconds = task.dailyLog
+        ? task.dailyLog[globalDate] || 0
+        : task.createdAt.split("T")[0] === globalDate
+        ? task.duration || 0
+        : 0;
+      groups[p].totalTime += daySeconds;
+
+      if (task.actualRevenue != null) {
+        const ratio = (task.duration || 0) > 0 ? daySeconds / task.duration : 1;
+        groups[p].totalRev += Number(task.actualRevenue) * ratio;
+      } else {
+        if (task.mode !== "bounty")
+          groups[p].totalRev += (daySeconds / 3600) * (task.hourlyRate || 0);
+        else if (
+          task.status === "Completed" &&
+          task.endTime &&
+          task.endTime.split("T")[0] === globalDate
+        )
+          groups[p].totalRev += task.fixedReward || 0;
+      }
+    });
+    return Object.values(groups).sort((a, b) => b.totalTime - a.totalTime);
+  }, [tasks, globalDate]);
+
+  const uniqueProjects = useMemo(
+    () => [...new Set(tasks.map((t) => t.project || "默认项目"))],
+    [tasks]
+  );
+
+  // --- Actions ---
+  const updateLocalTask = (taskId, updates) => {
+    setTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t))
+    );
+  };
+  // 🟢【插入这个新函数】
+  const handleExportJSON = () => {
+    // 打包所有数据
+    const data = {
+      user: user?.uid,
+      exportedAt: new Date().toISOString(),
+      stats,
+      tasks,
+      reviews,
+    };
+    // 创建下载链接并自动点击
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `life-system-backup-${
+      new Date().toISOString().split("T")[0]
+    }.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  // 👇👇👇 最终修复版 handleTaskAction (暂停、完成均强制存档，拒绝清零) 👇👇👇
+  const handleTaskAction = async (action, taskId, payload = null) => {
+    if (!user) return;
+
+    // 1. 获取当前内存中的最新任务状态 (包含刚刚跑出来的 duration)
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
+
+    const updates = {};
+
+    // --- 动作 1: 开始/暂停 (Toggle) ---
+    if (action === "toggle") {
+      if (activeTaskId === taskId) {
+        // 🛑 情况 A: 正在进行 -> 暂停
+        setActiveTaskId(null);
+        updates.status = "Pending";
+
+        // 🚨🚨🚨 核心修复：暂停时也要存档！🚨🚨🚨
+        // 把内存里的时间写入数据库，防止被云端旧数据覆盖
         updates.duration = task.duration || 0;
-
-        // 🚨 核心修复 3：完成任务时，不再自动写入 actualRevenue！
-        // 无论是计时还是悬赏，完成时一律保持“绿色的预测状态”，等你主动去点核算！
-      }
-
-      // --- 动作 3: 删除任务 ---
-      if (action === "delete") {
-        if (window.confirm("确认删除？")) {
-          if (isLocalMode)
-            setTasks((prev) => prev.filter((t) => t.id !== taskId));
-          else
-            await deleteDoc(
-              doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId)
-            );
-        }
-        return;
-      }
-      // --- 动作 4: 撤销完成 (终极修复：清空结算数据 + 激活计时) ---
-      if (action === "revert") {
-        // 1. 状态回滚
+      } else {
+        // ▶️ 情况 B: 暂停/未开始 -> 开始
+        setActiveTaskId(taskId);
         updates.status = "In Progress";
-        updates.endTime = null;
-        updates.duration = task.duration || 0;
+      }
+    }
 
-        // 🔴 核心修复：清空“已结算金额”。
-        // 只有把这个字段清空，卡片才会重新使用 (时长 * 时薪) 的公式来实时跳动金额。
-        updates.actualRevenue = null;
+    // --- 动作 2: 完成任务 (Complete) ---
+    if (action === "complete") {
+      if (activeTaskId === taskId) setActiveTaskId(null); // 停止计时
+      updates.status = "Completed";
+      updates.endTime = new Date().toISOString();
 
-        // 2. 重新激活全局计时器
+      updates.duration = task.duration || 0;
+
+      // 🚨 核心修复 3：完成任务时，不再自动写入 actualRevenue！
+      // 无论是计时还是悬赏，完成时一律保持“绿色的预测状态”，等你主动去点核算！
+    }
+
+    // --- 动作 3: 删除任务 ---
+    if (action === "delete") {
+      if (window.confirm("确认删除？")) {
+        if (isLocalMode)
+          setTasks((prev) => prev.filter((t) => t.id !== taskId));
+        else
+          await deleteDoc(
+            doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId)
+          );
+      }
+      return;
+    }
+    // --- 动作 4: 撤销完成 (终极修复：清空结算数据 + 激活计时) ---
+    if (action === "revert") {
+      // 1. 状态回滚
+      updates.status = "In Progress";
+      updates.endTime = null;
+      updates.duration = task.duration || 0;
+
+      // 🔴 核心修复：清空“已结算金额”。
+      // 只有把这个字段清空，卡片才会重新使用 (时长 * 时薪) 的公式来实时跳动金额。
+      updates.actualRevenue = null;
+
+      // 2. 重新激活全局计时器
+      setActiveTaskId(taskId);
+    }
+    // --- 动作 5: 手动核算金额 ---
+    if (action === "revenue") {
+      // 🔴 修改点：读取 payload 而不是 revenueInput。支持接收 null 以便“撤回”核算
+      updates.actualRevenue = payload === null ? null : Number(payload);
+    }
+
+    // --- 动作 6: 补录/调整时间 (跨天账本精准写入) ---
+    if (action === "adjust") {
+      const addedSeconds = Number(payload.addMinutes) * 60;
+
+      // 1. 更新任务的总时长 (为了算总进度)
+      updates.duration = (task.duration || 0) + addedSeconds;
+
+      // 2. 🚨 核心魔法：把时间精准注入到当前游标日 (globalDate)
+      const currentLog = task.dailyLog || {};
+      const targetDateLog = currentLog[globalDate] || 0;
+      updates.dailyLog = {
+        ...currentLog,
+        [globalDate]: targetDateLog + addedSeconds,
+      };
+
+      // 3. 只有手动填了钱，才更新实际收益 (保持预测模式)
+      if (Number(payload.addRevenue) > 0) {
+        updates.actualRevenue =
+          (task.actualRevenue || 0) + Number(payload.addRevenue);
+      }
+
+      // 4. 状态处理
+      if (payload.shouldStart) {
+        updates.status = "In Progress";
         setActiveTaskId(taskId);
       }
-      // --- 动作 5: 手动核算金额 ---
-      if (action === "revenue") {
-        // 🔴 修改点：读取 payload 而不是 revenueInput。支持接收 null 以便“撤回”核算
-        updates.actualRevenue = payload === null ? null : Number(payload);
+      setShowAdjustModal(false);
+    }
+
+    // --- 统一提交更新 ---
+    if (Object.keys(updates).length > 0) {
+      if (isLocalMode) {
+        updateLocalTask(taskId, updates);
+      } else {
+        await updateDoc(
+          doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId),
+          updates
+        );
       }
+    }
+  };
+  // 🔴 终极修复：处理验算逻辑 (修复长小数，支持清空撤回)
+  const handleRevenueEdit = (task) => {
+    setEditRevenueId(task.id);
 
-      // --- 动作 6: 补录/调整时间 (跨天账本精准写入) ---
-      if (action === "adjust") {
-        const addedSeconds = Number(payload.addMinutes) * 60;
+    // 先计算出当前的预测金额
+    const predicted = ((task.duration || 0) / 3600) * (task.hourlyRate || 0);
+    // 如果有实际金额用实际，否则用预测
+    const current = task.actualRevenue != null ? task.actualRevenue : predicted;
 
-        // 1. 更新任务的总时长 (为了算总进度)
-        updates.duration = (task.duration || 0) + addedSeconds;
+    // 弹出输入框，并使用 .toFixed(2) 保证不会出现 35.41666666 这种数字
+    const newVal = prompt(
+      "核算实际收益 (¥):\n如果不准，请修改；如果留空并确认，将自动撤销并恢复为预测收益。",
+      Number(current).toFixed(2)
+    );
 
-        // 2. 🚨 核心魔法：把时间精准注入到当前游标日 (globalDate)
-        const currentLog = task.dailyLog || {};
-        const targetDateLog = currentLog[globalDate] || 0;
-        updates.dailyLog = {
-          ...currentLog,
-          [globalDate]: targetDateLog + addedSeconds,
+    if (newVal !== null) {
+      if (newVal.trim() === "") {
+        // 留空代表撤销实际收益，恢复为系统预测
+        handleTaskAction("revenue", task.id, null);
+      } else {
+        // 输入了新数字，确认为实际收益
+        handleTaskAction("revenue", task.id, Number(newVal));
+      }
+    }
+  };
+  const handleTimeClick = (task) => {
+    // 打开补录弹窗，并重置输入框
+    setAdjustTaskData({ id: task.id, addMinutes: 0, addRevenue: 0 });
+    setShowAdjustModal(true);
+  };
+
+  // 👇👇👇 替换原来的 addTask 函数 (彻底修复金额死锁，永远保持预测) 👇👇👇
+  const addTask = async (shouldStartImmediately = false) => {
+    if (!user) return;
+
+    // 1. 确定项目名称
+    const finalProject = isNewProject
+      ? newTask.customProject || "未命名项目"
+      : newTask.project || "默认项目";
+
+    if (!newTask.title && !isManualEntry) return;
+
+    const id = Date.now().toString();
+
+    // 2. 确定时间 (补录 vs 实时)
+    let finalDate = new Date().toISOString();
+    if (isManualEntry && targetDate) {
+      finalDate = new Date(targetDate + "T12:00:00").toISOString();
+    }
+
+    // 3. 核心：计算 XP 倍率 (The Growth Multiplier)
+    let multiplier = 1.0;
+    if (newTask.xpType === "growth") multiplier = 2.0; // 进化 = 2倍经验
+    if (newTask.xpType === "maintenance") multiplier = 0.5; // 维持 = 0.5倍经验
+
+    // 4. 构建任务数据包
+    let taskData = {
+      id,
+      title: newTask.title || "快速记录",
+      project: finalProject,
+      createdAt: finalDate,
+      mode: newTask.mode || "stream",
+      xpType: newTask.xpType || "work",
+      expMult: multiplier,
+      hourlyRate: newTask.mode === "bounty" ? 0 : Number(newTask.estValue),
+      fixedReward: newTask.mode === "bounty" ? Number(newTask.estValue) : 0,
+      duration: Number(newTask.manualDurationMinutes) * 60,
+
+      // 🚨 核心修复：建立日记账，补录的时间直接记入指定的日期
+      dailyLog: {
+        [finalDate.split("T")[0]]: Number(newTask.manualDurationMinutes) * 60,
+      },
+      actualRevenue: null,
+
+      // --- RPG 新属性 ---
+      mode: newTask.mode || "stream", // 'stream' (计时) or 'bounty' (悬赏)
+      xpType: newTask.xpType || "work", // 'growth', 'work', 'maintenance'
+      expMult: multiplier,
+
+      hourlyRate: newTask.mode === "bounty" ? 0 : Number(newTask.estValue),
+      fixedReward: newTask.mode === "bounty" ? Number(newTask.estValue) : 0,
+
+      // --- 补录数据 ---
+      duration: Number(newTask.manualDurationMinutes) * 60,
+
+      // 🚨 核心修复 1：新建时一律设为 null！强制它保持“绿色的预测状态”！
+      actualRevenue: null,
+    };
+
+    // 5. 状态流转
+    if (shouldStartImmediately) {
+      taskData.status = "In Progress";
+      setActiveTaskId(id);
+    } else if (isManualEntry) {
+      taskData.status = "Completed";
+      taskData.endTime = finalDate;
+
+      // 🚨 核心修复 2：只有当你在补录时，真真实实填了 > 0 的钱，它才会变成实际收益
+      const manualRev = Number(newTask.manualRevenue);
+      if (manualRev > 0) {
+        taskData.actualRevenue = manualRev;
+      }
+      // （完美删除了自动把预测变实际的逻辑，交由 UI 动态计算）
+    } else {
+      taskData.status = "Pending";
+    }
+
+    // 6. 保存到数据库
+    if (isLocalMode) {
+      setTasks((prev) => [taskData, ...prev]);
+    } else {
+      await setDoc(
+        doc(db, "artifacts", appId, "users", user.uid, "tasks", id),
+        taskData
+      );
+    }
+
+    // 7. 重置表单 (保留项目以便连续输入)
+    setNewTask({
+      title: "",
+      project: finalProject,
+      customProject: "",
+      estValue: 0,
+      manualDurationMinutes: 0,
+      manualRevenue: 0,
+      mode: "stream",
+      xpType: "work",
+    });
+    setShowAddModal(false);
+    setIsManualEntry(false);
+    setIsNewProject(false);
+    setTargetDate(null);
+  };
+
+  // 👇👇👇 这是新加的函数，专门处理日历点击 👇👇👇
+  const handleCalendarDateSelect = (dateStr, dayData) => {
+    const todayStr = new Date().toISOString().split("T")[0];
+
+    // 1. 禁止穿越未来
+    if (dateStr > todayStr) {
+      alert("无法预支未来！");
+      return;
+    }
+
+    setTargetDate(dateStr); // 🟢 关键：把系统锁定在你点击的那一天
+
+    if (!dayData || dayData.count === 0) {
+      // 2. 如果当天没数据 -> 系统认为你想补录 -> 自动切到手动模式 -> 弹窗
+      setIsManualEntry(true);
+      setShowAddModal(true);
+    } else {
+      // 3. 如果当天有数据 -> 打开日报
+      openDailyReport(dateStr, dayData);
+    }
+  };
+
+  const openReviewForDate = (dateStr) => {
+    setReviewDate(dateStr);
+    const existingReview = reviews.find((r) => r.date === dateStr);
+    const formData = existingReview
+      ? {
+          bioEnergy: existingReview.bioEnergy || 5,
+          bioEnergyNote: existingReview.bioEnergyNote || "",
+          agency: existingReview.agency || 5,
+          agencyNote: existingReview.agencyNote || "",
+          connection: existingReview.connection || 5,
+          connectionNote: existingReview.connectionNote || "",
+          flow: existingReview.flow || 5,
+          flowNote: existingReview.flowNote || "",
+          awe: existingReview.awe || 5,
+          aweNote: existingReview.aweNote || "",
+          highlight: existingReview.highlight || "",
+        }
+      : {
+          bioEnergy: 5,
+          bioEnergyNote: "",
+          agency: 5,
+          agencyNote: "",
+          connection: 5,
+          connectionNote: "",
+          flow: 5,
+          flowNote: "",
+          awe: 5,
+          aweNote: "",
+          highlight: "",
         };
+    setReviewForm(formData);
+    setShowReviewModal(true);
+  };
 
-        // 3. 只有手动填了钱，才更新实际收益 (保持预测模式)
-        if (Number(payload.addRevenue) > 0) {
-          updates.actualRevenue =
-            (task.actualRevenue || 0) + Number(payload.addRevenue);
-        }
-
-        // 4. 状态处理
-        if (payload.shouldStart) {
-          updates.status = "In Progress";
-          setActiveTaskId(taskId);
-        }
-        setShowAdjustModal(false);
-      }
-
-      // --- 统一提交更新 ---
-      if (Object.keys(updates).length > 0) {
-        if (isLocalMode) {
-          updateLocalTask(taskId, updates);
-        } else {
-          await updateDoc(
-            doc(db, "artifacts", appId, "users", user.uid, "tasks", taskId),
-            updates
-          );
-        }
-      }
+  const submitReview = async () => {
+    const reviewData = {
+      ...reviewForm,
+      date: reviewDate,
+      updatedAt: new Date().toISOString(),
     };
-    // 🔴 终极修复：处理验算逻辑 (修复长小数，支持清空撤回)
-    const handleRevenueEdit = (task) => {
-      setEditRevenueId(task.id);
-
-      // 先计算出当前的预测金额
-      const predicted = ((task.duration || 0) / 3600) * (task.hourlyRate || 0);
-      // 如果有实际金额用实际，否则用预测
-      const current =
-        task.actualRevenue != null ? task.actualRevenue : predicted;
-
-      // 弹出输入框，并使用 .toFixed(2) 保证不会出现 35.41666666 这种数字
-      const newVal = prompt(
-        "核算实际收益 (¥):\n如果不准，请修改；如果留空并确认，将自动撤销并恢复为预测收益。",
-        Number(current).toFixed(2)
-      );
-
-      if (newVal !== null) {
-        if (newVal.trim() === "") {
-          // 留空代表撤销实际收益，恢复为系统预测
-          handleTaskAction("revenue", task.id, null);
-        } else {
-          // 输入了新数字，确认为实际收益
-          handleTaskAction("revenue", task.id, Number(newVal));
-        }
-      }
-    };
-    const handleTimeClick = (task) => {
-      // 打开补录弹窗，并重置输入框
-      setAdjustTaskData({ id: task.id, addMinutes: 0, addRevenue: 0 });
-      setShowAdjustModal(true);
-    };
-
-    // 👇👇👇 替换原来的 addTask 函数 (彻底修复金额死锁，永远保持预测) 👇👇👇
-    const addTask = async (shouldStartImmediately = false) => {
-      if (!user) return;
-
-      // 1. 确定项目名称
-      const finalProject = isNewProject
-        ? newTask.customProject || "未命名项目"
-        : newTask.project || "默认项目";
-
-      if (!newTask.title && !isManualEntry) return;
-
-      const id = Date.now().toString();
-
-      // 2. 确定时间 (补录 vs 实时)
-      let finalDate = new Date().toISOString();
-      if (isManualEntry && targetDate) {
-        finalDate = new Date(targetDate + "T12:00:00").toISOString();
-      }
-
-      // 3. 核心：计算 XP 倍率 (The Growth Multiplier)
-      let multiplier = 1.0;
-      if (newTask.xpType === "growth") multiplier = 2.0; // 进化 = 2倍经验
-      if (newTask.xpType === "maintenance") multiplier = 0.5; // 维持 = 0.5倍经验
-
-      // 4. 构建任务数据包
-      let taskData = {
-        id,
-        title: newTask.title || "快速记录",
-        project: finalProject,
-        createdAt: finalDate,
-        mode: newTask.mode || "stream",
-        xpType: newTask.xpType || "work",
-        expMult: multiplier,
-        hourlyRate: newTask.mode === "bounty" ? 0 : Number(newTask.estValue),
-        fixedReward: newTask.mode === "bounty" ? Number(newTask.estValue) : 0,
-        duration: Number(newTask.manualDurationMinutes) * 60,
-
-        // 🚨 核心修复：建立日记账，补录的时间直接记入指定的日期
-        dailyLog: {
-          [finalDate.split("T")[0]]: Number(newTask.manualDurationMinutes) * 60,
-        },
-        actualRevenue: null,
-
-        // --- RPG 新属性 ---
-        mode: newTask.mode || "stream", // 'stream' (计时) or 'bounty' (悬赏)
-        xpType: newTask.xpType || "work", // 'growth', 'work', 'maintenance'
-        expMult: multiplier,
-
-        hourlyRate: newTask.mode === "bounty" ? 0 : Number(newTask.estValue),
-        fixedReward: newTask.mode === "bounty" ? Number(newTask.estValue) : 0,
-
-        // --- 补录数据 ---
-        duration: Number(newTask.manualDurationMinutes) * 60,
-
-        // 🚨 核心修复 1：新建时一律设为 null！强制它保持“绿色的预测状态”！
-        actualRevenue: null,
-      };
-
-      // 5. 状态流转
-      if (shouldStartImmediately) {
-        taskData.status = "In Progress";
-        setActiveTaskId(id);
-      } else if (isManualEntry) {
-        taskData.status = "Completed";
-        taskData.endTime = finalDate;
-
-        // 🚨 核心修复 2：只有当你在补录时，真真实实填了 > 0 的钱，它才会变成实际收益
-        const manualRev = Number(newTask.manualRevenue);
-        if (manualRev > 0) {
-          taskData.actualRevenue = manualRev;
-        }
-        // （完美删除了自动把预测变实际的逻辑，交由 UI 动态计算）
-      } else {
-        taskData.status = "Pending";
-      }
-
-      // 6. 保存到数据库
-      if (isLocalMode) {
-        setTasks((prev) => [taskData, ...prev]);
-      } else {
-        await setDoc(
-          doc(db, "artifacts", appId, "users", user.uid, "tasks", id),
-          taskData
-        );
-      }
-
-      // 7. 重置表单 (保留项目以便连续输入)
-      setNewTask({
-        title: "",
-        project: finalProject,
-        customProject: "",
-        estValue: 0,
-        manualDurationMinutes: 0,
-        manualRevenue: 0,
-        mode: "stream",
-        xpType: "work",
+    if (isLocalMode) {
+      setReviews((prev) => {
+        const filtered = prev.filter((r) => r.date !== reviewDate);
+        return [...filtered, reviewData];
       });
-      setShowAddModal(false);
-      setIsManualEntry(false);
-      setIsNewProject(false);
-      setTargetDate(null);
-    };
-
-    // 👇👇👇 这是新加的函数，专门处理日历点击 👇👇👇
-    const handleCalendarDateSelect = (dateStr, dayData) => {
-      const todayStr = new Date().toISOString().split("T")[0];
-
-      // 1. 禁止穿越未来
-      if (dateStr > todayStr) {
-        alert("无法预支未来！");
-        return;
-      }
-
-      setTargetDate(dateStr); // 🟢 关键：把系统锁定在你点击的那一天
-
-      if (!dayData || dayData.count === 0) {
-        // 2. 如果当天没数据 -> 系统认为你想补录 -> 自动切到手动模式 -> 弹窗
-        setIsManualEntry(true);
-        setShowAddModal(true);
-      } else {
-        // 3. 如果当天有数据 -> 打开日报
-        openDailyReport(dateStr, dayData);
-      }
-    };
-
-    const openReviewForDate = (dateStr) => {
-      setReviewDate(dateStr);
-      const existingReview = reviews.find((r) => r.date === dateStr);
-      const formData = existingReview
-        ? {
-            bioEnergy: existingReview.bioEnergy || 5,
-            bioEnergyNote: existingReview.bioEnergyNote || "",
-            agency: existingReview.agency || 5,
-            agencyNote: existingReview.agencyNote || "",
-            connection: existingReview.connection || 5,
-            connectionNote: existingReview.connectionNote || "",
-            flow: existingReview.flow || 5,
-            flowNote: existingReview.flowNote || "",
-            awe: existingReview.awe || 5,
-            aweNote: existingReview.aweNote || "",
-            highlight: existingReview.highlight || "",
-          }
-        : {
-            bioEnergy: 5,
-            bioEnergyNote: "",
-            agency: 5,
-            agencyNote: "",
-            connection: 5,
-            connectionNote: "",
-            flow: 5,
-            flowNote: "",
-            awe: 5,
-            aweNote: "",
-            highlight: "",
-          };
-      setReviewForm(formData);
-      setShowReviewModal(true);
-    };
-
-    const submitReview = async () => {
-      const reviewData = {
-        ...reviewForm,
-        date: reviewDate,
-        updatedAt: new Date().toISOString(),
-      };
-      if (isLocalMode) {
-        setReviews((prev) => {
-          const filtered = prev.filter((r) => r.date !== reviewDate);
-          return [...filtered, reviewData];
-        });
-      } else {
-        await setDoc(
-          doc(db, "artifacts", appId, "users", user.uid, "reviews", reviewDate),
-          reviewData
-        );
-      }
-      setShowReviewModal(false);
-    };
-
-    const openDailyReport = (dateStr, data) => {
-      setReportDate(dateStr);
-      setReportData(data);
-      setShowDailyReportModal(true);
-    };
-
-    // 👇👇👇 第一步：替换时间格式化函数 (支持秒级跳动) 👇👇👇
-    const formatTime = (seconds) => {
-      if (!seconds) return "0s";
-      const h = Math.floor(seconds / 3600);
-      const m = Math.floor((seconds % 3600) / 60);
-      const s = Math.floor(seconds % 60);
-
-      // 逻辑：哪怕只有 5 秒，也要显示 5s，而不是 0m
-      if (h > 0) return `${h}h ${m}m ${s}s`;
-      if (m > 0) return `${m}m ${s}s`;
-      return `${s}s`;
-    };
-
-    if (authLoading)
-      return (
-        <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-          <StyleLoader />
-          <Loader2 className="animate-spin text-blue-500" />
-        </div>
+    } else {
+      await setDoc(
+        doc(db, "artifacts", appId, "users", user.uid, "reviews", reviewDate),
+        reviewData
       );
+    }
+    setShowReviewModal(false);
+  };
 
-    if (!user)
-      return (
-        <div className="min-h-screen w-full bg-[#020617] flex items-center justify-center p-4 relative overflow-hidden animate-fade-in">
-          <StyleLoader />
-          <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[100px] pointer-events-none"></div>
-          <div className="w-full max-w-md bg-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 md:p-12 shadow-2xl relative z-10 animate-slide-up text-center">
-            <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-rose-500 rounded-2xl flex items-center justify-center mb-8 mx-auto shadow-lg">
-              <Zap size={40} className="text-white" />
-            </div>
-            <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-200 to-rose-200 mb-2">
-              强者系统
-            </h1>
-            <p className="text-slate-400 text-sm mb-10 tracking-[0.2em] uppercase font-bold">
-              Life System v6.9 (Fixed)
-            </p>
-            <button
-              onClick={handleGoogleLogin}
-              className="w-full bg-white hover:bg-slate-50 text-slate-900 font-bold py-4 px-6 rounded-xl flex items-center justify-center gap-3 mb-4"
-            >
-              <Zap size={18} />
-              Google 登录
-            </button>
-            <button
-              onClick={handleAnonymousLogin}
-              className="w-full bg-white/5 hover:bg-white/10 text-slate-300 font-bold py-4 px-6 rounded-xl"
-            >
-              匿名访客试用
-            </button>
-            <button
-              onClick={startLocalMode}
-              className="w-full mt-2 text-slate-500 text-xs hover:text-slate-300 underline"
-            >
-              遇到问题？启用离线模式
-            </button>
-          </div>
-        </div>
-      );
+  const openDailyReport = (dateStr, data) => {
+    setReportDate(dateStr);
+    setReportData(data);
+    setShowDailyReportModal(true);
+  };
 
+  // 👇👇👇 第一步：替换时间格式化函数 (支持秒级跳动) 👇👇👇
+  const formatTime = (seconds) => {
+    if (!seconds) return "0s";
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+
+    // 逻辑：哪怕只有 5 秒，也要显示 5s，而不是 0m
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
+
+  if (authLoading)
     return (
-      <div className="min-h-screen bg-[#020617] text-slate-100 font-sans pb-24 animate-fade-in">
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <StyleLoader />
-        {/* 👇👇👇 新的 RPG 玩家状态栏 (完美适配 PC & 手机) 👇👇👇 */}
-        {/* 苹果级毛玻璃：backdrop-blur-2xl，半透明背景 */}
-        <div className="sticky top-0 z-40 bg-[#020617]/70 backdrop-blur-2xl border-b border-white/5 px-4 py-3 shadow-sm">
-          {/* 增加 max-w-4xl mx-auto，确保在电脑大屏上也不会拉伸得很丑 */}
-          <div className="flex justify-between items-center relative max-w-4xl mx-auto">
-            {/* === 左侧：玩家状态 HUD === */}
-            <div className="flex items-center gap-3 flex-1">
-              <div className="relative">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20 border border-white/10">
-                  <span className="font-bold text-white font-mono text-sm">
-                    Lv.{playerStats.level}
-                  </span>
-                </div>
+        <Loader2 className="animate-spin text-blue-500" />
+      </div>
+    );
+
+  if (!user)
+    return (
+      <div className="min-h-screen w-full bg-[#020617] flex items-center justify-center p-4 relative overflow-hidden animate-fade-in">
+        <StyleLoader />
+        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[100px] pointer-events-none"></div>
+        <div className="w-full max-w-md bg-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 md:p-12 shadow-2xl relative z-10 animate-slide-up text-center">
+          <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-rose-500 rounded-2xl flex items-center justify-center mb-8 mx-auto shadow-lg">
+            <Zap size={40} className="text-white" />
+          </div>
+          <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-200 to-rose-200 mb-2">
+            强者系统
+          </h1>
+          <p className="text-slate-400 text-sm mb-10 tracking-[0.2em] uppercase font-bold">
+            Life System v6.9 (Fixed)
+          </p>
+          <button
+            onClick={handleGoogleLogin}
+            className="w-full bg-white hover:bg-slate-50 text-slate-900 font-bold py-4 px-6 rounded-xl flex items-center justify-center gap-3 mb-4"
+          >
+            <Zap size={18} />
+            Google 登录
+          </button>
+          <button
+            onClick={handleAnonymousLogin}
+            className="w-full bg-white/5 hover:bg-white/10 text-slate-300 font-bold py-4 px-6 rounded-xl"
+          >
+            匿名访客试用
+          </button>
+          <button
+            onClick={startLocalMode}
+            className="w-full mt-2 text-slate-500 text-xs hover:text-slate-300 underline"
+          >
+            遇到问题？启用离线模式
+          </button>
+        </div>
+      </div>
+    );
+
+  return (
+    <div className="min-h-screen bg-[#020617] text-slate-100 font-sans pb-24 animate-fade-in">
+      <StyleLoader />
+      {/* 👇👇👇 新的 RPG 玩家状态栏 (完美适配 PC & 手机) 👇👇👇 */}
+      {/* 苹果级毛玻璃：backdrop-blur-2xl，半透明背景 */}
+      <div className="sticky top-0 z-40 bg-[#020617]/70 backdrop-blur-2xl border-b border-white/5 px-4 py-3 shadow-sm">
+        {/* 增加 max-w-4xl mx-auto，确保在电脑大屏上也不会拉伸得很丑 */}
+        <div className="flex justify-between items-center relative max-w-4xl mx-auto">
+          {/* === 左侧：玩家状态 HUD === */}
+          <div className="flex items-center gap-3 flex-1">
+            <div className="relative">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20 border border-white/10">
+                <span className="font-bold text-white font-mono text-sm">
+                  Lv.{playerStats.level}
+                </span>
+              </div>
+              <div
+                className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-[#020617] ${
+                  isLocalMode ? "bg-amber-500" : "bg-emerald-500"
+                }`}
+              ></div>
+            </div>
+
+            <div className="flex-1 max-w-[140px]">
+              <div className="flex justify-between items-end mb-1">
+                <span className="text-xs font-bold text-white tracking-wider flex items-center gap-1">
+                  {playerStats.title}
+                  {isLocalMode && (
+                    <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1 rounded">
+                      OFFLINE
+                    </span>
+                  )}
+                </span>
+                <span className="text-[9px] font-mono text-blue-300">
+                  {playerStats.currentLevelXP}/{playerStats.nextLevelXP}
+                </span>
+              </div>
+              <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
                 <div
-                  className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-[#020617] ${
-                    isLocalMode ? "bg-amber-500" : "bg-emerald-500"
-                  }`}
+                  className="h-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)]"
+                  style={{ width: `${playerStats.progress}%` }}
                 ></div>
               </div>
-
-              <div className="flex-1 max-w-[140px]">
-                <div className="flex justify-between items-end mb-1">
-                  <span className="text-xs font-bold text-white tracking-wider flex items-center gap-1">
-                    {playerStats.title}
-                    {isLocalMode && (
-                      <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1 rounded">
-                        OFFLINE
-                      </span>
-                    )}
-                  </span>
-                  <span className="text-[9px] font-mono text-blue-300">
-                    {playerStats.currentLevelXP}/{playerStats.nextLevelXP}
-                  </span>
-                </div>
-                <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)]"
-                    style={{ width: `${playerStats.progress}%` }}
-                  ></div>
-                </div>
-              </div>
-            </div>
-
-            {/* === 中间：PC 端专属导航栏 (核心修复) === */}
-            {/* md:flex 表示在大于 iPad 宽度的屏幕上显示，absolute 绝对居中 */}
-            <div className="hidden md:flex items-center gap-10 absolute left-1/2 -translate-x-1/2">
-              <button
-                onClick={() => setActiveTab("execution")}
-                className={`text-sm font-bold flex items-center gap-2 transition-all ${
-                  activeTab === "execution"
-                    ? "text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.6)]"
-                    : "text-slate-500 hover:text-slate-300"
-                }`}
-              >
-                <LayoutDashboard size={18} /> 作战
-              </button>
-              <button
-                onClick={() => setActiveTab("audit")}
-                className={`text-sm font-bold flex items-center gap-2 transition-all ${
-                  activeTab === "audit"
-                    ? "text-rose-400 drop-shadow-[0_0_8px_rgba(251,113,133,0.6)]"
-                    : "text-slate-500 hover:text-slate-300"
-                }`}
-              >
-                <Heart size={18} /> 审计
-              </button>
-              <button
-                onClick={() => setActiveTab("assets")}
-                className={`text-sm font-bold flex items-center gap-2 transition-all ${
-                  activeTab === "assets"
-                    ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.6)]"
-                    : "text-slate-500 hover:text-slate-300"
-                }`}
-              >
-                <ShieldCheck size={18} /> 资产
-              </button>
-            </div>
-
-            {/* === 右侧：用户菜单 === */}
-            <div className="flex-1 flex justify-end">
-              <button
-                onClick={() => setShowUserMenu(!showUserMenu)}
-                className="p-1 rounded-full hover:bg-white/5 text-slate-400 hover:text-white transition-colors active:scale-90"
-              >
-                {user?.photoURL ? (
-                  <img
-                    src={user.photoURL}
-                    className="w-8 h-8 rounded-full border border-white/10"
-                    alt="User"
-                  />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
-                    <LayoutDashboard size={16} />
-                  </div>
-                )}
-              </button>
             </div>
           </div>
 
-          {/* 👇 账号切换下拉菜单 (解决切换难的问题) 👇 */}
-          {showUserMenu && (
-            <>
-              <div
-                className="fixed inset-0 z-40 bg-black/20"
-                onClick={() => setShowUserMenu(false)}
-              ></div>
-              <div className="absolute top-full right-2 mt-2 w-64 bg-[#1e293b] border border-slate-700 rounded-2xl shadow-2xl p-4 z-50 animate-slide-up origin-top-right">
-                <div className="flex items-center gap-3 mb-4 pb-4 border-b border-slate-700/50">
-                  <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-xl">
-                    {user?.photoURL ? (
-                      <img
-                        src={user.photoURL}
-                        className="w-10 h-10 rounded-full"
-                        alt=""
-                      />
-                    ) : (
-                      "👤"
-                    )}
+          {/* === 中间：PC 端专属导航栏 (核心修复) === */}
+          {/* md:flex 表示在大于 iPad 宽度的屏幕上显示，absolute 绝对居中 */}
+          <div className="hidden md:flex items-center gap-10 absolute left-1/2 -translate-x-1/2">
+            <button
+              onClick={() => setActiveTab("execution")}
+              className={`text-sm font-bold flex items-center gap-2 transition-all ${
+                activeTab === "execution"
+                  ? "text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.6)]"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              <LayoutDashboard size={18} /> 作战
+            </button>
+            <button
+              onClick={() => setActiveTab("audit")}
+              className={`text-sm font-bold flex items-center gap-2 transition-all ${
+                activeTab === "audit"
+                  ? "text-rose-400 drop-shadow-[0_0_8px_rgba(251,113,133,0.6)]"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              <Heart size={18} /> 审计
+            </button>
+            <button
+              onClick={() => setActiveTab("assets")}
+              className={`text-sm font-bold flex items-center gap-2 transition-all ${
+                activeTab === "assets"
+                  ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.6)]"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              <ShieldCheck size={18} /> 资产
+            </button>
+          </div>
+
+          {/* === 右侧：用户菜单 === */}
+          <div className="flex-1 flex justify-end">
+            <button
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              className="p-1 rounded-full hover:bg-white/5 text-slate-400 hover:text-white transition-colors active:scale-90"
+            >
+              {user?.photoURL ? (
+                <img
+                  src={user.photoURL}
+                  className="w-8 h-8 rounded-full border border-white/10"
+                  alt="User"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
+                  <LayoutDashboard size={16} />
+                </div>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* 👇 账号切换下拉菜单 (解决切换难的问题) 👇 */}
+        {showUserMenu && (
+          <>
+            <div
+              className="fixed inset-0 z-40 bg-black/20"
+              onClick={() => setShowUserMenu(false)}
+            ></div>
+            <div className="absolute top-full right-2 mt-2 w-64 bg-[#1e293b] border border-slate-700 rounded-2xl shadow-2xl p-4 z-50 animate-slide-up origin-top-right">
+              <div className="flex items-center gap-3 mb-4 pb-4 border-b border-slate-700/50">
+                <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-xl">
+                  {user?.photoURL ? (
+                    <img
+                      src={user.photoURL}
+                      className="w-10 h-10 rounded-full"
+                      alt=""
+                    />
+                  ) : (
+                    "👤"
+                  )}
+                </div>
+                <div className="overflow-hidden">
+                  <div className="text-sm font-bold text-white truncate">
+                    {user?.displayName || "匿名强者"}
                   </div>
-                  <div className="overflow-hidden">
-                    <div className="text-sm font-bold text-white truncate">
-                      {user?.displayName || "匿名强者"}
-                    </div>
-                    <div className="text-xs text-slate-500 truncate">
-                      {user?.email || "Local User"}
-                    </div>
+                  <div className="text-xs text-slate-500 truncate">
+                    {user?.email || "Local User"}
                   </div>
                 </div>
+              </div>
 
+              <button
+                onClick={() => {
+                  if (isLocalMode) {
+                    setUser(null);
+                    setIsLocalMode(false);
+                  } else {
+                    signOut(auth);
+                  }
+                  setShowUserMenu(false);
+                }}
+                className="w-full py-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all"
+              >
+                <LogOut size={16} /> 退出登录 / 切换账号
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+      <div className="max-w-4xl mx-auto p-4 space-y-8 mt-4">
+        {/* BLOCK 1: Life Audit */}
+        {activeTab === "audit" && (
+          <section className="bg-white/5 border border-white/10 rounded-3xl p-6 relative overflow-hidden group hover:border-white/20 transition-all">
+            <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none group-hover:opacity-10 transition-opacity duration-500">
+              <Fingerprint size={120} />
+            </div>
+            <div className="flex items-center justify-between mb-6 relative z-10">
+              <div>
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <Heart className="text-rose-500" size={20} /> 人生满意度审计
+                </h2>
+                <p className="text-slate-400 text-sm mt-1">
+                  "不要让亲人猜你幸不幸福，留下铁证。"
+                </p>
+              </div>
+              <div className="flex bg-black/40 p-1 rounded-xl border border-white/10">
                 <button
-                  onClick={() => {
-                    if (isLocalMode) {
-                      setUser(null);
-                      setIsLocalMode(false);
-                    } else {
-                      signOut(auth);
-                    }
-                    setShowUserMenu(false);
-                  }}
-                  className="w-full py-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all"
+                  onClick={() => setAuditViewMode("trends")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
+                    auditViewMode === "trends"
+                      ? "bg-slate-700 text-white shadow"
+                      : "text-slate-500 hover:text-slate-300"
+                  }`}
                 >
-                  <LogOut size={16} /> 退出登录 / 切换账号
+                  <BarChart2 size={14} /> 趋势
+                </button>
+                <button
+                  onClick={() => setAuditViewMode("calendar")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
+                    auditViewMode === "calendar"
+                      ? "bg-slate-700 text-white shadow"
+                      : "text-slate-500 hover:text-slate-300"
+                  }`}
+                >
+                  <CalendarIcon size={14} /> 日历
                 </button>
               </div>
-            </>
-          )}
-        </div>
-        <div className="max-w-4xl mx-auto p-4 space-y-8 mt-4">
-          {/* BLOCK 1: Life Audit */}
-          {activeTab === "audit" && (
-            <section className="bg-white/5 border border-white/10 rounded-3xl p-6 relative overflow-hidden group hover:border-white/20 transition-all">
-              <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none group-hover:opacity-10 transition-opacity duration-500">
-                <Fingerprint size={120} />
-              </div>
-              <div className="flex items-center justify-between mb-6 relative z-10">
-                <div>
-                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                    <Heart className="text-rose-500" size={20} /> 人生满意度审计
-                  </h2>
-                  <p className="text-slate-400 text-sm mt-1">
-                    "不要让亲人猜你幸不幸福，留下铁证。"
+            </div>
+
+            {auditViewMode === "trends" ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative z-10 animate-fade-in">
+                <div
+                  onClick={() => setSelectedStat("agency")}
+                  className="bg-black/20 rounded-2xl p-4 border border-white/5 hover:border-amber-500/30 transition-colors group/card cursor-pointer"
+                >
+                  <div className="flex justify-between items-end mb-2">
+                    <span className="text-xs font-bold text-amber-500 uppercase tracking-wider flex items-center gap-1">
+                      <Fingerprint size={12} /> 自主权趋势{" "}
+                      <Info size={12} className="opacity-50" />
+                    </span>
+                    <span className="text-2xl font-mono font-bold text-white">
+                      {stats.avgAgency}
+                    </span>
+                  </div>
+                  <TrendChart
+                    data={reviews.slice(0, 14)}
+                    dataKey="agency"
+                    color="#f59e0b"
+                    height={40}
+                  />
+                </div>
+                <div className="bg-black/20 rounded-2xl p-4 border border-white/5 hover:border-emerald-500/30 transition-colors flex flex-col justify-between">
+                  <span className="text-xs font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1">
+                    <Battery size={12} /> 生理能量
+                  </span>
+                  <div className="flex items-center gap-3 mt-2">
+                    <div className="h-10 w-1 bg-emerald-500/20 rounded-full overflow-hidden">
+                      <div
+                        className="w-full bg-emerald-500"
+                        style={{
+                          height: `${
+                            (reviews.slice(0, 1)[0]?.bioEnergy || 0) * 10
+                          }%`,
+                        }}
+                      ></div>
+                    </div>
+                    <div>
+                      <span className="text-2xl font-mono font-bold text-white block leading-none">
+                        {reviews.length > 0
+                          ? reviews.slice(0, 1)[0]?.bioEnergy || "-"
+                          : "-"}
+                      </span>
+                      <span className="text-[10px] text-slate-500 uppercase">
+                        最新记录
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-black/20 rounded-2xl p-4 border border-white/5 hover:border-purple-500/30 transition-colors flex flex-col justify-center">
+                  <span className="text-xs font-bold text-purple-500 uppercase mb-2 tracking-wider flex items-center gap-1">
+                    <Zap size={12} /> 最新编年史
+                  </span>
+                  <p className="text-sm text-slate-300 italic line-clamp-2">
+                    "{reviews.slice(0, 1)[0]?.highlight || "今日暂无记录..."}"
                   </p>
                 </div>
+              </div>
+            ) : (
+              <div className="relative z-10">
+                <CalendarView
+                  type="review"
+                  data={reviews}
+                  onSelectDate={openReviewForDate}
+                />
+              </div>
+            )}
+
+            {auditViewMode === "trends" && (
+              <div className="mt-4 flex justify-end relative z-10">
+                <button
+                  onClick={() =>
+                    openReviewForDate(new Date().toISOString().split("T")[0])
+                  }
+                  className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all shadow-lg ${
+                    todayReview
+                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/50"
+                      : "bg-gradient-to-r from-rose-600 to-pink-600 text-white"
+                  }`}
+                >
+                  {todayReview ? (
+                    <CheckCircle2 size={16} />
+                  ) : (
+                    <PenTool size={16} />
+                  )}{" "}
+                  {todayReview ? "今日已审计 (点击修改)" : "开始今日审计"}
+                </button>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* BLOCK 2: Task Execution */}
+        {activeTab === "execution" && (
+          <section className="bg-white/5 border border-white/10 rounded-3xl p-6 relative overflow-hidden group hover:border-white/20 transition-all">
+            <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none group-hover:opacity-10 transition-opacity duration-500">
+              <Activity size={120} />
+            </div>
+            {/* ====== 顶部标题与操作栏 ====== */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 relative z-10 gap-4">
+              {/* 标题区域：加入日期游标指示器 */}
+              <div>
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <LayoutDashboard className="text-blue-500" size={20} />
+                  <span className="tracking-tight">作战看板</span>
+
+                  {/* 🔴 这里就是新增的炫酷日期游标徽章 */}
+                  <div className="ml-2 px-2 py-0.5 rounded-md bg-blue-500/20 border border-blue-500/30 flex items-center gap-1.5 shadow-[0_0_10px_rgba(59,130,246,0.2)] transition-all">
+                    <CalendarIcon size={12} className="text-blue-400" />
+                    <span className="text-[11px] font-mono font-bold text-blue-300 tracking-wider">
+                      {globalDate === new Date().toISOString().split("T")[0]
+                        ? "今日实时"
+                        : globalDate}
+                    </span>
+                  </div>
+                </h2>
+                <p className="text-slate-400 text-sm mt-1">
+                  "像经营公司一样经营你的人生。"
+                </p>
+              </div>
+
+              {/* 按钮控制区域 (保留了你原来的按钮) */}
+              <div className="flex items-center justify-between md:justify-end gap-2 w-full md:w-auto">
                 <div className="flex bg-black/40 p-1 rounded-xl border border-white/10">
                   <button
-                    onClick={() => setAuditViewMode("trends")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
-                      auditViewMode === "trends"
+                    onClick={() => setTaskViewMode("list")}
+                    className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
+                      taskViewMode === "list"
                         ? "bg-slate-700 text-white shadow"
                         : "text-slate-500 hover:text-slate-300"
                     }`}
                   >
-                    <BarChart2 size={14} /> 趋势
+                    <CheckSquare size={14} /> 列表
                   </button>
                   <button
-                    onClick={() => setAuditViewMode("calendar")}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
-                      auditViewMode === "calendar"
+                    onClick={() => setTaskViewMode("calendar")}
+                    className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
+                      taskViewMode === "calendar"
                         ? "bg-slate-700 text-white shadow"
                         : "text-slate-500 hover:text-slate-300"
                     }`}
@@ -2053,1199 +2190,1040 @@ const App = () => {
                     <CalendarIcon size={14} /> 日历
                   </button>
                 </div>
-              </div>
 
-              {auditViewMode === "trends" ? (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative z-10 animate-fade-in">
-                  <div
-                    onClick={() => setSelectedStat("agency")}
-                    className="bg-black/20 rounded-2xl p-4 border border-white/5 hover:border-amber-500/30 transition-colors group/card cursor-pointer"
-                  >
-                    <div className="flex justify-between items-end mb-2">
-                      <span className="text-xs font-bold text-amber-500 uppercase tracking-wider flex items-center gap-1">
-                        <Fingerprint size={12} /> 自主权趋势{" "}
-                        <Info size={12} className="opacity-50" />
-                      </span>
-                      <span className="text-2xl font-mono font-bold text-white">
-                        {stats.avgAgency}
-                      </span>
-                    </div>
-                    <TrendChart
-                      data={reviews.slice(0, 14)}
-                      dataKey="agency"
-                      color="#f59e0b"
-                      height={40}
-                    />
+                <button
+                  onClick={() => {
+                    setTargetDate(null);
+                    setIsManualEntry(false);
+                    setShowAddModal(true);
+                  }}
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg hover:scale-105 active:scale-95 transition-all"
+                >
+                  <Plus size={18} />
+                  <span className="hidden md:inline">投入新项目</span>
+                </button>
+              </div>
+            </div>
+
+            {/* ====== 🔴 核心数据面板 (全面切换为 stats.daily 单日聚焦) ====== */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 relative z-10">
+              <StatBox
+                label="单日时薪 (ROI)"
+                prefix="¥"
+                value={stats.daily.avgROI.toFixed(0)}
+                unit="/h"
+                color={
+                  stats.daily.avgROI < HOURLY_THRESHOLD &&
+                  stats.daily.durationHrs > 0
+                    ? "text-rose-400 drop-shadow-[0_0_10px_rgba(244,63,94,0.3)]"
+                    : "text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.3)]"
+                }
+                icon={<TrendingUp size={14} />}
+                onClick={() => setSelectedStat("roi")}
+              />
+
+              <StatBox
+                label="单日营收 (落袋)"
+                prefix="¥"
+                value={stats.daily.actualRev.toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+                unit=""
+                color="text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)]"
+                icon={<DollarSign size={14} />}
+                onClick={() => setSelectedStat("revenue")}
+                subNode={
+                  <div className="text-[10px] text-emerald-400 font-mono font-bold flex items-center gap-1 bg-emerald-500/10 w-fit px-1.5 py-0.5 rounded border border-emerald-500/20">
+                    +¥
+                    {stats.daily.predictedRev.toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{" "}
+                    预测
                   </div>
-                  <div className="bg-black/20 rounded-2xl p-4 border border-white/5 hover:border-emerald-500/30 transition-colors flex flex-col justify-between">
-                    <span className="text-xs font-bold text-emerald-500 uppercase tracking-wider flex items-center gap-1">
-                      <Battery size={12} /> 生理能量
-                    </span>
-                    <div className="flex items-center gap-3 mt-2">
-                      <div className="h-10 w-1 bg-emerald-500/20 rounded-full overflow-hidden">
+                }
+              />
+
+              <StatBox
+                label="单日投入时长"
+                prefix=""
+                value={stats.daily.durationHrs.toFixed(1)}
+                unit="h"
+                color="text-blue-400 drop-shadow-[0_0_10px_rgba(59,130,246,0.3)]"
+                icon={<Clock size={14} />}
+                onClick={() => setSelectedStat("duration")}
+              />
+
+              <StatBox
+                label="单日时间负债"
+                prefix=""
+                value={stats.daily.debtTasks}
+                unit="个"
+                color={
+                  stats.daily.debtTasks > 0
+                    ? "text-rose-400 drop-shadow-[0_0_10px_rgba(244,63,94,0.3)]"
+                    : "text-slate-400"
+                }
+                icon={<AlertCircle size={14} />}
+                onClick={() => setSelectedStat("debt")}
+              />
+            </div>
+
+            {taskViewMode === "list" ? (
+              <div className="space-y-8 relative z-10 animate-fade-in">
+                {/* 空状态提示 */}
+                {groupedTasks.length === 0 && (
+                  <div className="text-center py-12 text-slate-600 text-xs border border-dashed border-slate-800 rounded-2xl">
+                    暂无战斗部署，请新建项目。
+                  </div>
+                )}
+
+                {/* 任务分组渲染 */}
+                {/* 👇👇👇 任务分组渲染 (Grid 动画版) 👇👇👇 */}
+                {groupedTasks.map((group) => {
+                  const isExpanded = expandedGroups[group.name];
+
+                  return (
+                    <div key={group.name} className="space-y-0">
+                      {" "}
+                      {/* 间距由内部控制 */}
+                      {/* 分组标题栏 */}
+                      <div
+                        className="flex items-center gap-3 py-3 px-1 cursor-pointer select-none group/header"
+                        onClick={() => toggleGroup(group.name)}
+                      >
                         <div
-                          className="w-full bg-emerald-500"
-                          style={{
-                            height: `${
-                              (reviews.slice(0, 1)[0]?.bioEnergy || 0) * 10
-                            }%`,
-                          }}
-                        ></div>
-                      </div>
-                      <div>
-                        <span className="text-2xl font-mono font-bold text-white block leading-none">
-                          {reviews.length > 0
-                            ? reviews.slice(0, 1)[0]?.bioEnergy || "-"
-                            : "-"}
-                        </span>
-                        <span className="text-[10px] text-slate-500 uppercase">
-                          最新记录
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="bg-black/20 rounded-2xl p-4 border border-white/5 hover:border-purple-500/30 transition-colors flex flex-col justify-center">
-                    <span className="text-xs font-bold text-purple-500 uppercase mb-2 tracking-wider flex items-center gap-1">
-                      <Zap size={12} /> 最新编年史
-                    </span>
-                    <p className="text-sm text-slate-300 italic line-clamp-2">
-                      "{reviews.slice(0, 1)[0]?.highlight || "今日暂无记录..."}"
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="relative z-10">
-                  <CalendarView
-                    type="review"
-                    data={reviews}
-                    onSelectDate={openReviewForDate}
-                  />
-                </div>
-              )}
-
-              {auditViewMode === "trends" && (
-                <div className="mt-4 flex justify-end relative z-10">
-                  <button
-                    onClick={() =>
-                      openReviewForDate(new Date().toISOString().split("T")[0])
-                    }
-                    className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all shadow-lg ${
-                      todayReview
-                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/50"
-                        : "bg-gradient-to-r from-rose-600 to-pink-600 text-white"
-                    }`}
-                  >
-                    {todayReview ? (
-                      <CheckCircle2 size={16} />
-                    ) : (
-                      <PenTool size={16} />
-                    )}{" "}
-                    {todayReview ? "今日已审计 (点击修改)" : "开始今日审计"}
-                  </button>
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* BLOCK 2: Task Execution */}
-          {activeTab === "execution" && (
-            <section className="bg-white/5 border border-white/10 rounded-3xl p-6 relative overflow-hidden group hover:border-white/20 transition-all">
-              <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none group-hover:opacity-10 transition-opacity duration-500">
-                <Activity size={120} />
-              </div>
-              {/* ====== 顶部标题与操作栏 ====== */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 relative z-10 gap-4">
-                {/* 标题区域：加入日期游标指示器 */}
-                <div>
-                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                    <LayoutDashboard className="text-blue-500" size={20} />
-                    <span className="tracking-tight">作战看板</span>
-
-                    {/* 🔴 这里就是新增的炫酷日期游标徽章 */}
-                    <div className="ml-2 px-2 py-0.5 rounded-md bg-blue-500/20 border border-blue-500/30 flex items-center gap-1.5 shadow-[0_0_10px_rgba(59,130,246,0.2)] transition-all">
-                      <CalendarIcon size={12} className="text-blue-400" />
-                      <span className="text-[11px] font-mono font-bold text-blue-300 tracking-wider">
-                        {globalDate === new Date().toISOString().split("T")[0]
-                          ? "今日实时"
-                          : globalDate}
-                      </span>
-                    </div>
-                  </h2>
-                  <p className="text-slate-400 text-sm mt-1">
-                    "像经营公司一样经营你的人生。"
-                  </p>
-                </div>
-
-                {/* 按钮控制区域 (保留了你原来的按钮) */}
-                <div className="flex items-center justify-between md:justify-end gap-2 w-full md:w-auto">
-                  <div className="flex bg-black/40 p-1 rounded-xl border border-white/10">
-                    <button
-                      onClick={() => setTaskViewMode("list")}
-                      className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
-                        taskViewMode === "list"
-                          ? "bg-slate-700 text-white shadow"
-                          : "text-slate-500 hover:text-slate-300"
-                      }`}
-                    >
-                      <CheckSquare size={14} /> 列表
-                    </button>
-                    <button
-                      onClick={() => setTaskViewMode("calendar")}
-                      className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
-                        taskViewMode === "calendar"
-                          ? "bg-slate-700 text-white shadow"
-                          : "text-slate-500 hover:text-slate-300"
-                      }`}
-                    >
-                      <CalendarIcon size={14} /> 日历
-                    </button>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      setTargetDate(null);
-                      setIsManualEntry(false);
-                      setShowAddModal(true);
-                    }}
-                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg hover:scale-105 active:scale-95 transition-all"
-                  >
-                    <Plus size={18} />
-                    <span className="hidden md:inline">投入新项目</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* ====== 🔴 核心数据面板 (全面切换为 stats.daily 单日聚焦) ====== */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 relative z-10">
-                <StatBox
-                  label="单日时薪 (ROI)"
-                  prefix="¥"
-                  value={stats.daily.avgROI.toFixed(0)}
-                  unit="/h"
-                  color={
-                    stats.daily.avgROI < HOURLY_THRESHOLD &&
-                    stats.daily.durationHrs > 0
-                      ? "text-rose-400 drop-shadow-[0_0_10px_rgba(244,63,94,0.3)]"
-                      : "text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.3)]"
-                  }
-                  icon={<TrendingUp size={14} />}
-                  onClick={() => setSelectedStat("roi")}
-                />
-
-                <StatBox
-                  label="单日营收 (落袋)"
-                  prefix="¥"
-                  value={stats.daily.actualRev.toLocaleString("en-US", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
-                  unit=""
-                  color="text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)]"
-                  icon={<DollarSign size={14} />}
-                  onClick={() => setSelectedStat("revenue")}
-                  subNode={
-                    <div className="text-[10px] text-emerald-400 font-mono font-bold flex items-center gap-1 bg-emerald-500/10 w-fit px-1.5 py-0.5 rounded border border-emerald-500/20">
-                      +¥
-                      {stats.daily.predictedRev.toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}{" "}
-                      预测
-                    </div>
-                  }
-                />
-
-                <StatBox
-                  label="单日投入时长"
-                  prefix=""
-                  value={stats.daily.durationHrs.toFixed(1)}
-                  unit="h"
-                  color="text-blue-400 drop-shadow-[0_0_10px_rgba(59,130,246,0.3)]"
-                  icon={<Clock size={14} />}
-                  onClick={() => setSelectedStat("duration")}
-                />
-
-                <StatBox
-                  label="单日时间负债"
-                  prefix=""
-                  value={stats.daily.debtTasks}
-                  unit="个"
-                  color={
-                    stats.daily.debtTasks > 0
-                      ? "text-rose-400 drop-shadow-[0_0_10px_rgba(244,63,94,0.3)]"
-                      : "text-slate-400"
-                  }
-                  icon={<AlertCircle size={14} />}
-                  onClick={() => setSelectedStat("debt")}
-                />
-              </div>
-
-              {taskViewMode === "list" ? (
-                <div className="space-y-8 relative z-10 animate-fade-in">
-                  {/* 空状态提示 */}
-                  {groupedTasks.length === 0 && (
-                    <div className="text-center py-12 text-slate-600 text-xs border border-dashed border-slate-800 rounded-2xl">
-                      暂无战斗部署，请新建项目。
-                    </div>
-                  )}
-
-                  {/* 任务分组渲染 */}
-                  {/* 👇👇👇 任务分组渲染 (Grid 动画版) 👇👇👇 */}
-                  {groupedTasks.map((group) => {
-                    const isExpanded = expandedGroups[group.name];
-
-                    return (
-                      <div key={group.name} className="space-y-0">
-                        {" "}
-                        {/* 间距由内部控制 */}
-                        {/* 分组标题栏 */}
-                        <div
-                          className="flex items-center gap-3 py-3 px-1 cursor-pointer select-none group/header"
-                          onClick={() => toggleGroup(group.name)}
+                          className={`p-1.5 rounded-lg border transition-all duration-300 ${
+                            isExpanded
+                              ? "bg-blue-500/20 border-blue-500/30 text-blue-400 rotate-90"
+                              : "bg-slate-800/50 border-white/5 text-slate-500 rotate-0"
+                          }`}
                         >
-                          <div
-                            className={`p-1.5 rounded-lg border transition-all duration-300 ${
-                              isExpanded
-                                ? "bg-blue-500/20 border-blue-500/30 text-blue-400 rotate-90"
-                                : "bg-slate-800/50 border-white/5 text-slate-500 rotate-0"
-                            }`}
-                          >
-                            <ChevronRight size={14} />
-                          </div>
-                          <h3
-                            className={`text-xs font-bold uppercase tracking-widest ${
-                              isExpanded ? "text-white" : "text-slate-500"
-                            }`}
-                          >
-                            {group.name}
-                          </h3>
-                          <div className="h-px bg-slate-800 flex-1 ml-2 group-hover/header:bg-slate-700 transition-colors"></div>
-                          <span className="text-[10px] text-slate-600 font-mono">
-                            {formatTime(group.totalTime)} · ¥
-                            {group.totalRev.toFixed(0)}
-                          </span>
+                          <ChevronRight size={14} />
                         </div>
-                        {/* 🔴 核心动画修改：使用 CSS Grid 实现手风琴效果 
+                        <h3
+                          className={`text-xs font-bold uppercase tracking-widest ${
+                            isExpanded ? "text-white" : "text-slate-500"
+                          }`}
+                        >
+                          {group.name}
+                        </h3>
+                        <div className="h-px bg-slate-800 flex-1 ml-2 group-hover/header:bg-slate-700 transition-colors"></div>
+                        <span className="text-[10px] text-slate-600 font-mono">
+                          {formatTime(group.totalTime)} · ¥
+                          {group.totalRev.toFixed(0)}
+                        </span>
+                      </div>
+                      {/* 🔴 核心动画修改：使用 CSS Grid 实现手风琴效果 
                           不再使用条件渲染 ({isExpanded && ...})
                           grid-rows-[0fr] -> 高度为0，隐藏
                           grid-rows-[1fr] -> 高度自动适应，展开
                       */}
-                        <div
-                          className={`grid transition-[grid-template-rows] duration-300 ease-out ${
-                            isExpanded
-                              ? "grid-rows-[1fr] mb-4"
-                              : "grid-rows-[0fr] mb-0"
-                          }`}
-                        >
-                          <div className="overflow-hidden min-h-0">
-                            <div className="pt-2 space-y-3">
-                              {" "}
-                              {/* 内部增加一点 pt 防止贴太紧 */}
-                              {group.tasks.map((task) => {
-                                const isActive = activeTaskId === task.id;
-                                const isCompleted = task.status === "Completed";
-                                const isBounty = task.mode === "bounty";
-                                const taskHours = (task.duration || 0) / 3600;
-                                const currentRev =
-                                  task.actualRevenue ||
-                                  ((task.duration || 0) / 3600) *
-                                    task.hourlyRate;
-                                const realHourlyRate =
-                                  taskHours > 0 ? currentRev / taskHours : 0;
-                                const isTimeDebt =
-                                  !isBounty &&
-                                  isCompleted &&
-                                  taskHours > 0 &&
-                                  realHourlyRate < HOURLY_THRESHOLD;
+                      <div
+                        className={`grid transition-[grid-template-rows] duration-300 ease-out ${
+                          isExpanded
+                            ? "grid-rows-[1fr] mb-4"
+                            : "grid-rows-[0fr] mb-0"
+                        }`}
+                      >
+                        <div className="overflow-hidden min-h-0">
+                          <div className="pt-2 space-y-3">
+                            {" "}
+                            {/* 内部增加一点 pt 防止贴太紧 */}
+                            {group.tasks.map((task) => {
+                              const isActive = activeTaskId === task.id;
+                              const isCompleted = task.status === "Completed";
+                              const isBounty = task.mode === "bounty";
+                              const taskHours = (task.duration || 0) / 3600;
+                              const currentRev =
+                                task.actualRevenue ||
+                                ((task.duration || 0) / 3600) * task.hourlyRate;
+                              const realHourlyRate =
+                                taskHours > 0 ? currentRev / taskHours : 0;
+                              const isTimeDebt =
+                                !isBounty &&
+                                isCompleted &&
+                                taskHours > 0 &&
+                                realHourlyRate < HOURLY_THRESHOLD;
 
-                                return (
-                                  <SwipeableTaskCard
-                                    key={task.id}
-                                    task={task}
-                                    isActive={isActive}
-                                    isTimeDebt={isTimeDebt}
-                                    isCompleted={isCompleted}
-                                    handleTaskAction={handleTaskAction}
-                                    formatTime={formatTime}
-                                    setEditRevenueId={setEditRevenueId}
-                                    setRevenueInput={setRevenueInput}
-                                    handleRevenueEdit={handleRevenueEdit}
-                                    onTimeClick={handleTimeClick} // 👈 记得加上这一行！
-                                  />
-                                );
-                              })}
-                            </div>
+                              return (
+                                <SwipeableTaskCard
+                                  key={task.id}
+                                  task={task}
+                                  isActive={isActive}
+                                  isTimeDebt={isTimeDebt}
+                                  isCompleted={isCompleted}
+                                  handleTaskAction={handleTaskAction}
+                                  formatTime={formatTime}
+                                  setEditRevenueId={setEditRevenueId}
+                                  setRevenueInput={setRevenueInput}
+                                  handleRevenueEdit={handleRevenueEdit}
+                                  onTimeClick={handleTimeClick} // 👈 记得加上这一行！
+                                />
+                              );
+                            })}
                           </div>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="relative z-10">
-                  <CalendarView
-                    type="task"
-                    data={tasks}
-                    onSelectDate={handleCalendarDateSelect}
-                  />
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* === Tab 3: Assets (新增的资产板块) === */}
-          {activeTab === "assets" && (
-            <section className="bg-white/5 border border-white/10 rounded-3xl p-6 animate-fade-in">
-              <h2 className="text-2xl font-bold text-white flex items-center gap-2 mb-6">
-                <ShieldCheck className="text-slate-400" size={20} /> 资产与数据
-              </h2>
-              <div className="space-y-4">
-                <div className="bg-black/40 p-4 rounded-xl border border-white/5 flex items-center justify-between">
-                  <div>
-                    <div className="font-bold text-white flex items-center gap-2">
-                      <Database size={16} className="text-blue-500" /> JSON
-                      数据导出
                     </div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      将所有人生数据打包下载，确保数据主权。
-                    </div>
-                  </div>
-                  {/* 这里的 handleExportJSON 就是你刚才在第4步加的那个函数 */}
-                  <button
-                    onClick={handleExportJSON}
-                    className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 hover:text-white transition-colors"
-                  >
-                    <Download size={18} />
-                  </button>
-                </div>
-                <div className="bg-black/40 p-4 rounded-xl border border-white/5 flex items-center justify-between">
-                  <div>
-                    <div className="font-bold text-white">账户状态</div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {isLocalMode
-                        ? "离线模式 (数据存储在浏览器)"
-                        : `已同步云端 (${user.email || "Google User"})`}
-                    </div>
-                  </div>
-                  {isLocalMode && (
-                    <button
-                      onClick={() => {
-                        setUser(null);
-                        setIsLocalMode(false);
-                      }}
-                      className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg"
-                    >
-                      去登录同步
-                    </button>
-                  )}
-                </div>
+                  );
+                })}
               </div>
-            </section>
-          )}
-        </div>
+            ) : (
+              <div className="relative z-10">
+                <CalendarView
+                  type="task"
+                  data={tasks}
+                  onSelectDate={handleCalendarDateSelect}
+                />
+              </div>
+            )}
+          </section>
+        )}
 
-        {/* Review Modal (动态仪表盘升级版) */}
-        {showReviewModal && (
-          <div
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/90 backdrop-blur-md transition-opacity animate-fade-in"
-            onClick={() => setShowReviewModal(false)}
-          >
-            <div
-              className="bg-[#0f172a] border-t sm:border border-slate-800 sm:rounded-3xl w-full max-w-md shadow-2xl animate-slide-up h-[90vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* === 1. 顶部动态仪表盘 (核心升级) === */}
-              {(() => {
-                // 实时计算平均分
-                const avgScore = (
-                  (Number(reviewForm.bioEnergy) +
-                    Number(reviewForm.agency) +
-                    Number(reviewForm.connection) +
-                    Number(reviewForm.flow) +
-                    Number(reviewForm.awe)) /
-                  5
-                ).toFixed(1);
-
-                // 根据分数决定颜色和评语
-                let statusColor = "text-rose-500";
-                let statusBg = "bg-rose-500/10 border-rose-500/20";
-                let statusText = "🛑 系统崩溃";
-
-                if (avgScore >= 3) {
-                  statusColor = "text-orange-400";
-                  statusBg = "bg-orange-500/10 border-orange-500/20";
-                  statusText = "⚠️ 艰难维持";
-                }
-                if (avgScore >= 5) {
-                  statusColor = "text-yellow-400";
-                  statusBg = "bg-yellow-500/10 border-yellow-500/20";
-                  statusText = "⚓️ 平稳运行";
-                }
-                if (avgScore >= 7) {
-                  statusColor = "text-emerald-400";
-                  statusBg = "bg-emerald-500/10 border-emerald-500/20";
-                  statusText = "🚀 状态极佳";
-                }
-                if (avgScore >= 9) {
-                  statusColor = "text-cyan-400";
-                  statusBg =
-                    "bg-cyan-500/10 border-cyan-500/50 shadow-[0_0_20px_rgba(34,211,238,0.3)]";
-                  statusText = "💎 巅峰时刻";
-                }
-
-                return (
-                  <div className="shrink-0 bg-[#0f172a] z-20 border-b border-slate-800 pb-4 pt-6 px-6 rounded-t-3xl relative overflow-hidden">
-                    {/* 背景光效 */}
-                    <div
-                      className={`absolute top-0 left-1/2 -translate-x-1/2 w-64 h-32 ${statusColor.replace(
-                        "text-",
-                        "bg-"
-                      )}/10 blur-[60px] pointer-events-none rounded-full`}
-                    ></div>
-
-                    <div className="flex justify-between items-start relative z-10">
-                      <div>
-                        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">
-                          今日综合状态
-                        </h3>
-                        <div
-                          className={`text-4xl font-mono font-bold transition-all duration-500 flex items-baseline gap-2 ${statusColor}`}
-                        >
-                          {avgScore}
-                          <span className="text-sm font-sans font-bold opacity-80 px-2 py-0.5 rounded-lg border bg-black/20 border-white/10">
-                            {statusText}
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setShowReviewModal(false)}
-                        className="p-2 bg-slate-800/50 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
-                      >
-                        <X size={20} />
-                      </button>
-                    </div>
+        {/* === Tab 3: Assets (新增的资产板块) === */}
+        {activeTab === "assets" && (
+          <section className="bg-white/5 border border-white/10 rounded-3xl p-6 animate-fade-in">
+            <h2 className="text-2xl font-bold text-white flex items-center gap-2 mb-6">
+              <ShieldCheck className="text-slate-400" size={20} /> 资产与数据
+            </h2>
+            <div className="space-y-4">
+              <div className="bg-black/40 p-4 rounded-xl border border-white/5 flex items-center justify-between">
+                <div>
+                  <div className="font-bold text-white flex items-center gap-2">
+                    <Database size={16} className="text-blue-500" /> JSON
+                    数据导出
                   </div>
-                );
-              })()}
-
-              {/* === 2. 可滚动的内容区 === */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                <AuditItem
-                  type="bioEnergy"
-                  val={reviewForm.bioEnergy}
-                  setVal={(v) => setReviewForm({ ...reviewForm, bioEnergy: v })}
-                  note={reviewForm.bioEnergyNote}
-                  setNote={(v) =>
-                    setReviewForm({ ...reviewForm, bioEnergyNote: v })
-                  }
-                />
-                <AuditItem
-                  type="agency"
-                  val={reviewForm.agency}
-                  setVal={(v) => setReviewForm({ ...reviewForm, agency: v })}
-                  note={reviewForm.agencyNote}
-                  setNote={(v) =>
-                    setReviewForm({ ...reviewForm, agencyNote: v })
-                  }
-                />
-                <AuditItem
-                  type="connection"
-                  val={reviewForm.connection}
-                  setVal={(v) =>
-                    setReviewForm({ ...reviewForm, connection: v })
-                  }
-                  note={reviewForm.connectionNote}
-                  setNote={(v) =>
-                    setReviewForm({ ...reviewForm, connectionNote: v })
-                  }
-                />
-                <AuditItem
-                  type="flow"
-                  val={reviewForm.flow}
-                  setVal={(v) => setReviewForm({ ...reviewForm, flow: v })}
-                  note={reviewForm.flowNote}
-                  setNote={(v) => setReviewForm({ ...reviewForm, flowNote: v })}
-                />
-                <AuditItem
-                  type="awe"
-                  val={reviewForm.awe}
-                  setVal={(v) => setReviewForm({ ...reviewForm, awe: v })}
-                  note={reviewForm.aweNote}
-                  setNote={(v) => setReviewForm({ ...reviewForm, aweNote: v })}
-                />
-
-                {/* 编年史输入区 (UI微调) */}
-                <div className="pt-4 border-t border-slate-800/50">
-                  <label className="text-xs font-bold text-slate-400 uppercase mb-3 flex items-center gap-2">
-                    <PenTool size={12} /> 史官笔录 (One Line Chronicle)
-                  </label>
-                  <div className="relative">
-                    <textarea
-                      value={reviewForm.highlight}
-                      onChange={(e) =>
-                        setReviewForm({
-                          ...reviewForm,
-                          highlight: e.target.value,
-                        })
-                      }
-                      className="w-full bg-[#1e293b]/40 border border-slate-700/50 rounded-2xl p-4 text-base h-32 outline-none focus:border-purple-500/50 focus:bg-[#1e293b]/60 text-slate-200 placeholder:text-slate-600 transition-all resize-none leading-relaxed"
-                      placeholder="此刻，有什么值得被写进你的人生传记里？..."
-                    />
-                    {/* 装饰性角标 */}
-                    <div className="absolute bottom-3 right-3 opacity-30">
-                      <History size={16} />
-                    </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    将所有人生数据打包下载，确保数据主权。
                   </div>
                 </div>
-              </div>
-
-              {/* === 3. 底部固定按钮 === */}
-              <div className="p-6 pt-2 bg-[#0f172a] border-t border-slate-800 z-20">
+                {/* 这里的 handleExportJSON 就是你刚才在第4步加的那个函数 */}
                 <button
-                  onClick={submitReview}
-                  className="w-full py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 rounded-2xl font-bold text-white shadow-lg shadow-blue-900/20 active:scale-95 transition-all flex items-center justify-center gap-2 text-base tracking-wide"
+                  onClick={handleExportJSON}
+                  className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 hover:text-white transition-colors"
                 >
-                  <CheckCircle2 size={20} /> 确认今日归档
+                  <Download size={18} />
+                </button>
+              </div>
+              <div className="bg-black/40 p-4 rounded-xl border border-white/5 flex items-center justify-between">
+                <div>
+                  <div className="font-bold text-white">账户状态</div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    {isLocalMode
+                      ? "离线模式 (数据存储在浏览器)"
+                      : `已同步云端 (${user.email || "Google User"})`}
+                  </div>
+                </div>
+                {isLocalMode && (
+                  <button
+                    onClick={() => {
+                      setUser(null);
+                      setIsLocalMode(false);
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg"
+                  >
+                    去登录同步
+                  </button>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+      </div>
+
+      {/* Review Modal (动态仪表盘升级版) */}
+      {showReviewModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/90 backdrop-blur-md transition-opacity animate-fade-in"
+          onClick={() => setShowReviewModal(false)}
+        >
+          <div
+            className="bg-[#0f172a] border-t sm:border border-slate-800 sm:rounded-3xl w-full max-w-md shadow-2xl animate-slide-up h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* === 1. 顶部动态仪表盘 (核心升级) === */}
+            {(() => {
+              // 实时计算平均分
+              const avgScore = (
+                (Number(reviewForm.bioEnergy) +
+                  Number(reviewForm.agency) +
+                  Number(reviewForm.connection) +
+                  Number(reviewForm.flow) +
+                  Number(reviewForm.awe)) /
+                5
+              ).toFixed(1);
+
+              // 根据分数决定颜色和评语
+              let statusColor = "text-rose-500";
+              let statusBg = "bg-rose-500/10 border-rose-500/20";
+              let statusText = "🛑 系统崩溃";
+
+              if (avgScore >= 3) {
+                statusColor = "text-orange-400";
+                statusBg = "bg-orange-500/10 border-orange-500/20";
+                statusText = "⚠️ 艰难维持";
+              }
+              if (avgScore >= 5) {
+                statusColor = "text-yellow-400";
+                statusBg = "bg-yellow-500/10 border-yellow-500/20";
+                statusText = "⚓️ 平稳运行";
+              }
+              if (avgScore >= 7) {
+                statusColor = "text-emerald-400";
+                statusBg = "bg-emerald-500/10 border-emerald-500/20";
+                statusText = "🚀 状态极佳";
+              }
+              if (avgScore >= 9) {
+                statusColor = "text-cyan-400";
+                statusBg =
+                  "bg-cyan-500/10 border-cyan-500/50 shadow-[0_0_20px_rgba(34,211,238,0.3)]";
+                statusText = "💎 巅峰时刻";
+              }
+
+              return (
+                <div className="shrink-0 bg-[#0f172a] z-20 border-b border-slate-800 pb-4 pt-6 px-6 rounded-t-3xl relative overflow-hidden">
+                  {/* 背景光效 */}
+                  <div
+                    className={`absolute top-0 left-1/2 -translate-x-1/2 w-64 h-32 ${statusColor.replace(
+                      "text-",
+                      "bg-"
+                    )}/10 blur-[60px] pointer-events-none rounded-full`}
+                  ></div>
+
+                  <div className="flex justify-between items-start relative z-10">
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">
+                        今日综合状态
+                      </h3>
+                      <div
+                        className={`text-4xl font-mono font-bold transition-all duration-500 flex items-baseline gap-2 ${statusColor}`}
+                      >
+                        {avgScore}
+                        <span className="text-sm font-sans font-bold opacity-80 px-2 py-0.5 rounded-lg border bg-black/20 border-white/10">
+                          {statusText}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setShowReviewModal(false)}
+                      className="p-2 bg-slate-800/50 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* === 2. 可滚动的内容区 === */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <AuditItem
+                type="bioEnergy"
+                val={reviewForm.bioEnergy}
+                setVal={(v) => setReviewForm({ ...reviewForm, bioEnergy: v })}
+                note={reviewForm.bioEnergyNote}
+                setNote={(v) =>
+                  setReviewForm({ ...reviewForm, bioEnergyNote: v })
+                }
+              />
+              <AuditItem
+                type="agency"
+                val={reviewForm.agency}
+                setVal={(v) => setReviewForm({ ...reviewForm, agency: v })}
+                note={reviewForm.agencyNote}
+                setNote={(v) => setReviewForm({ ...reviewForm, agencyNote: v })}
+              />
+              <AuditItem
+                type="connection"
+                val={reviewForm.connection}
+                setVal={(v) => setReviewForm({ ...reviewForm, connection: v })}
+                note={reviewForm.connectionNote}
+                setNote={(v) =>
+                  setReviewForm({ ...reviewForm, connectionNote: v })
+                }
+              />
+              <AuditItem
+                type="flow"
+                val={reviewForm.flow}
+                setVal={(v) => setReviewForm({ ...reviewForm, flow: v })}
+                note={reviewForm.flowNote}
+                setNote={(v) => setReviewForm({ ...reviewForm, flowNote: v })}
+              />
+              <AuditItem
+                type="awe"
+                val={reviewForm.awe}
+                setVal={(v) => setReviewForm({ ...reviewForm, awe: v })}
+                note={reviewForm.aweNote}
+                setNote={(v) => setReviewForm({ ...reviewForm, aweNote: v })}
+              />
+
+              {/* 编年史输入区 (UI微调) */}
+              <div className="pt-4 border-t border-slate-800/50">
+                <label className="text-xs font-bold text-slate-400 uppercase mb-3 flex items-center gap-2">
+                  <PenTool size={12} /> 史官笔录 (One Line Chronicle)
+                </label>
+                <div className="relative">
+                  <textarea
+                    value={reviewForm.highlight}
+                    onChange={(e) =>
+                      setReviewForm({
+                        ...reviewForm,
+                        highlight: e.target.value,
+                      })
+                    }
+                    className="w-full bg-[#1e293b]/40 border border-slate-700/50 rounded-2xl p-4 text-base h-32 outline-none focus:border-purple-500/50 focus:bg-[#1e293b]/60 text-slate-200 placeholder:text-slate-600 transition-all resize-none leading-relaxed"
+                    placeholder="此刻，有什么值得被写进你的人生传记里？..."
+                  />
+                  {/* 装饰性角标 */}
+                  <div className="absolute bottom-3 right-3 opacity-30">
+                    <History size={16} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* === 3. 底部固定按钮 === */}
+            <div className="p-6 pt-2 bg-[#0f172a] border-t border-slate-800 z-20">
+              <button
+                onClick={submitReview}
+                className="w-full py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 rounded-2xl font-bold text-white shadow-lg shadow-blue-900/20 active:scale-95 transition-all flex items-center justify-center gap-2 text-base tracking-wide"
+              >
+                <CheckCircle2 size={20} /> 确认今日归档
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Task / Manual Entry Modal (RPG 契约升级版) */}
+      {showAddModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in"
+          onClick={() => setShowAddModal(false)}
+        >
+          <div
+            className="bg-[#0f172a] border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 顶部标题栏 */}
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                {targetDate ? (
+                  <>
+                    <CalendarIcon size={18} className="text-amber-500" />{" "}
+                    补录旧账: {targetDate}
+                  </>
+                ) : (
+                  <>
+                    <Plus size={18} className="text-blue-500" /> 发布新悬赏
+                  </>
+                )}
+              </h3>
+              <div className="flex bg-black/40 p-1 rounded-lg border border-white/5">
+                <button
+                  onClick={() => setIsManualEntry(false)}
+                  className={`px-3 py-1.5 text-[10px] font-bold rounded transition-all ${
+                    !isManualEntry
+                      ? "bg-blue-600 text-white shadow"
+                      : "text-slate-500 hover:text-slate-300"
+                  }`}
+                >
+                  实时
+                </button>
+                <button
+                  onClick={() => setIsManualEntry(true)}
+                  className={`px-3 py-1.5 text-[10px] font-bold rounded transition-all ${
+                    isManualEntry
+                      ? "bg-amber-600 text-white shadow"
+                      : "text-slate-500 hover:text-slate-300"
+                  }`}
+                >
+                  补录
                 </button>
               </div>
             </div>
-          </div>
-        )}
 
-        {/* Add Task / Manual Entry Modal (RPG 契约升级版) */}
-        {showAddModal && (
-          <div
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in"
-            onClick={() => setShowAddModal(false)}
-          >
-            <div
-              className="bg-[#0f172a] border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-slide-up"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* 顶部标题栏 */}
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="font-bold text-lg text-white flex items-center gap-2">
-                  {targetDate ? (
-                    <>
-                      <CalendarIcon size={18} className="text-amber-500" />{" "}
-                      补录旧账: {targetDate}
-                    </>
-                  ) : (
-                    <>
-                      <Plus size={18} className="text-blue-500" /> 发布新悬赏
-                    </>
-                  )}
-                </h3>
-                <div className="flex bg-black/40 p-1 rounded-lg border border-white/5">
+            <div className="space-y-5">
+              {/* 1. 核心属性：结算模式 (Stream vs Bounty) */}
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">
+                  选择结算模式 (Settlement Mode)
+                </label>
+                <div className="grid grid-cols-2 gap-3">
                   <button
-                    onClick={() => setIsManualEntry(false)}
-                    className={`px-3 py-1.5 text-[10px] font-bold rounded transition-all ${
-                      !isManualEntry
-                        ? "bg-blue-600 text-white shadow"
-                        : "text-slate-500 hover:text-slate-300"
+                    onClick={() => setNewTask({ ...newTask, mode: "stream" })}
+                    className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${
+                      newTask.mode !== "bounty" // 默认 stream
+                        ? "bg-blue-500/10 border-blue-500 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.2)]"
+                        : "bg-black/40 border-slate-800 text-slate-500 hover:border-slate-600"
                     }`}
                   >
-                    实时
+                    <Clock size={20} />
+                    <span className="text-xs font-bold">⏳ 计时付 (流式)</span>
+                    <span className="text-[9px] opacity-60">
+                      按时长累计收益
+                    </span>
                   </button>
                   <button
-                    onClick={() => setIsManualEntry(true)}
-                    className={`px-3 py-1.5 text-[10px] font-bold rounded transition-all ${
-                      isManualEntry
-                        ? "bg-amber-600 text-white shadow"
-                        : "text-slate-500 hover:text-slate-300"
+                    onClick={() => setNewTask({ ...newTask, mode: "bounty" })}
+                    className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${
+                      newTask.mode === "bounty"
+                        ? "bg-amber-500/10 border-amber-500 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]"
+                        : "bg-black/40 border-slate-800 text-slate-500 hover:border-slate-600"
                     }`}
                   >
-                    补录
+                    <Target size={20} />
+                    <span className="text-xs font-bold">🏆 一口价 (悬赏)</span>
+                    <span className="text-[9px] opacity-60">
+                      必须完工才结算
+                    </span>
                   </button>
                 </div>
               </div>
 
-              <div className="space-y-5">
-                {/* 1. 核心属性：结算模式 (Stream vs Bounty) */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase mb-2 block">
-                    选择结算模式 (Settlement Mode)
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={() => setNewTask({ ...newTask, mode: "stream" })}
-                      className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${
-                        newTask.mode !== "bounty" // 默认 stream
-                          ? "bg-blue-500/10 border-blue-500 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.2)]"
-                          : "bg-black/40 border-slate-800 text-slate-500 hover:border-slate-600"
-                      }`}
-                    >
-                      <Clock size={20} />
-                      <span className="text-xs font-bold">
-                        ⏳ 计时付 (流式)
-                      </span>
-                      <span className="text-[9px] opacity-60">
-                        按时长累计收益
-                      </span>
-                    </button>
-                    <button
-                      onClick={() => setNewTask({ ...newTask, mode: "bounty" })}
-                      className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${
-                        newTask.mode === "bounty"
-                          ? "bg-amber-500/10 border-amber-500 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]"
-                          : "bg-black/40 border-slate-800 text-slate-500 hover:border-slate-600"
-                      }`}
-                    >
-                      <Target size={20} />
-                      <span className="text-xs font-bold">
-                        🏆 一口价 (悬赏)
-                      </span>
-                      <span className="text-[9px] opacity-60">
-                        必须完工才结算
-                      </span>
-                    </button>
-                  </div>
-                </div>
+              {/* 2. 项目与任务名 */}
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={newTask.title}
+                  onChange={(e) =>
+                    setNewTask({ ...newTask, title: e.target.value })
+                  }
+                  className="w-full bg-black/40 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 outline-none focus:border-blue-500 transition-all font-bold"
+                  placeholder="任务名称 (e.g. 攻克算法题)"
+                  autoFocus
+                />
 
-                {/* 2. 项目与任务名 */}
-                <div className="space-y-3">
-                  <input
-                    type="text"
-                    value={newTask.title}
-                    onChange={(e) =>
-                      setNewTask({ ...newTask, title: e.target.value })
-                    }
-                    className="w-full bg-black/40 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 outline-none focus:border-blue-500 transition-all font-bold"
-                    placeholder="任务名称 (e.g. 攻克算法题)"
-                    autoFocus
-                  />
-
-                  <div className="flex gap-2">
-                    <select
-                      value={isNewProject ? "NEW" : newTask.project}
-                      onChange={(e) => {
-                        if (e.target.value === "NEW") {
-                          setIsNewProject(true);
-                          setNewTask({ ...newTask, project: "" });
-                        } else {
-                          setIsNewProject(false);
-                          setNewTask({ ...newTask, project: e.target.value });
-                        }
-                      }}
-                      className="flex-1 bg-black/40 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-300 outline-none focus:border-blue-500"
-                    >
-                      <option value="" disabled>
-                        选择项目...
+                <div className="flex gap-2">
+                  <select
+                    value={isNewProject ? "NEW" : newTask.project}
+                    onChange={(e) => {
+                      if (e.target.value === "NEW") {
+                        setIsNewProject(true);
+                        setNewTask({ ...newTask, project: "" });
+                      } else {
+                        setIsNewProject(false);
+                        setNewTask({ ...newTask, project: e.target.value });
+                      }
+                    }}
+                    className="flex-1 bg-black/40 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-300 outline-none focus:border-blue-500"
+                  >
+                    <option value="" disabled>
+                      选择项目...
+                    </option>
+                    {uniqueProjects.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
                       </option>
-                      {uniqueProjects.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
-                      ))}
-                      <option value="NEW">+ 新建项目</option>
-                    </select>
-                    {isNewProject && (
-                      <input
-                        type="text"
-                        value={newTask.customProject}
-                        onChange={(e) =>
-                          setNewTask({
-                            ...newTask,
-                            customProject: e.target.value,
-                          })
-                        }
-                        className="flex-1 bg-black/40 border border-blue-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-blue-500 animate-fade-in"
-                        placeholder="新项目名"
-                      />
-                    )}
-                  </div>
-                </div>
-
-                {/* 3. 价值定义 (XP倍率 & 金额) */}
-                <div className="bg-slate-900/50 p-4 rounded-2xl border border-white/5 space-y-4">
-                  {/* XP 成长类型 */}
-                  <div>
-                    <label className="text-[10px] font-bold text-purple-400 uppercase mb-2 block flex items-center gap-1">
-                      <Zap size={10} /> 经验值倍率 (XP Growth)
-                    </label>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() =>
-                          setNewTask({ ...newTask, xpType: "growth" })
-                        }
-                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
-                          newTask.xpType === "growth"
-                            ? "bg-purple-600 text-white border-purple-400 shadow-lg shadow-purple-900/50"
-                            : "bg-slate-800 text-slate-400 border-transparent hover:bg-slate-700"
-                        }`}
-                      >
-                        🟣 进化 (200%)
-                      </button>
-                      <button
-                        onClick={() =>
-                          setNewTask({ ...newTask, xpType: "work" })
-                        }
-                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
-                          !newTask.xpType || newTask.xpType === "work"
-                            ? "bg-blue-600 text-white border-blue-400 shadow-lg shadow-blue-900/50"
-                            : "bg-slate-800 text-slate-400 border-transparent hover:bg-slate-700"
-                        }`}
-                      >
-                        🔵 搬砖 (100%)
-                      </button>
-                      <button
-                        onClick={() =>
-                          setNewTask({ ...newTask, xpType: "maintenance" })
-                        }
-                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
-                          newTask.xpType === "maintenance"
-                            ? "bg-emerald-600 text-white border-emerald-400 shadow-lg shadow-emerald-900/50"
-                            : "bg-slate-800 text-slate-400 border-transparent hover:bg-slate-700"
-                        }`}
-                      >
-                        🟢 维持 (50%)
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 金额设定 */}
-                  <div>
-                    <label className="text-[10px] font-bold text-emerald-400 uppercase mb-2 block flex items-center gap-1">
-                      <DollarSign size={10} />
-                      {newTask.mode === "bounty"
-                        ? "悬赏总金额 (Bounty)"
-                        : "预计时薪 (Hourly Rate)"}
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-mono">
-                        ¥
-                      </span>
-                      <input
-                        type="number"
-                        value={newTask.estValue}
-                        onChange={(e) =>
-                          setNewTask({ ...newTask, estValue: e.target.value })
-                        }
-                        className="w-full bg-black/40 border border-emerald-500/30 rounded-xl py-3 pl-8 pr-4 text-emerald-400 font-mono font-bold outline-none focus:border-emerald-500 placeholder:text-slate-700"
-                        placeholder="0"
-                      />
-                      {newTask.mode !== "bounty" && (
-                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 text-xs font-bold">
-                          / hour
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* 补录模式下的额外时间输入 */}
-                {isManualEntry && (
-                  <div className="animate-fade-in">
-                    <label className="text-[10px] font-bold text-amber-500 uppercase mb-1 block">
-                      已耗时 (分钟)
-                    </label>
+                    ))}
+                    <option value="NEW">+ 新建项目</option>
+                  </select>
+                  {isNewProject && (
                     <input
-                      type="number"
-                      value={newTask.manualDurationMinutes}
+                      type="text"
+                      value={newTask.customProject}
                       onChange={(e) =>
                         setNewTask({
                           ...newTask,
-                          manualDurationMinutes: e.target.value,
+                          customProject: e.target.value,
                         })
                       }
-                      className="w-full bg-black/40 border border-amber-500/50 rounded-xl px-4 py-3 text-white outline-none focus:border-amber-500"
+                      className="flex-1 bg-black/40 border border-blue-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-blue-500 animate-fade-in"
+                      placeholder="新项目名"
                     />
-                  </div>
-                )}
-
-                {/* 底部按钮 */}
-                <div className="pt-2">
-                  <button
-                    onClick={() => addTask(isManualEntry ? false : true)} // 补录直接归档，实时则开始计时
-                    className={`w-full py-4 rounded-xl font-bold text-white shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 ${
-                      newTask.mode === "bounty"
-                        ? "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500"
-                        : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500"
-                    }`}
-                  >
-                    {isManualEntry ? (
-                      <>
-                        {" "}
-                        <CheckCircle2 size={18} /> 立即归档入库{" "}
-                      </>
-                    ) : newTask.mode === "bounty" ? (
-                      <>
-                        {" "}
-                        <Target size={18} /> 发布悬赏令{" "}
-                      </>
-                    ) : (
-                      <>
-                        {" "}
-                        <Play size={18} /> 启动计时器{" "}
-                      </>
-                    )}
-                  </button>
+                  )}
                 </div>
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* Daily Report Modal (New Feature) */}
-        {showDailyReportModal && reportData && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-fade-in"
-            onClick={() => setShowDailyReportModal(false)}
-          >
-            <div
-              className="bg-[#0f172a] border border-slate-800 p-6 rounded-3xl max-w-sm w-full shadow-2xl animate-slide-up max-h-[85vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-lg">
-                    {reportDate.split("-")[2]}
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-white text-lg">单日战报</h3>
-                    <p className="text-slate-500 text-xs font-mono">
-                      {reportDate}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowDailyReportModal(false)}
-                  className="p-2 bg-slate-800 rounded-full text-slate-400 hover:text-white"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 mb-6">
-                <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl">
-                  <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">
-                    当日投入
-                  </div>
-                  <div className="font-mono text-white text-lg font-bold">
-                    {(reportData.duration / 3600).toFixed(1)}h
-                  </div>
-                </div>
-                <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl">
-                  <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">
-                    当日产出
-                  </div>
-                  <div className="font-mono text-emerald-400 text-lg font-bold">
-                    ¥
-                    {reportData.tasks.reduce(
-                      (acc, t) => acc + (t.actualRevenue || 0),
-                      (0).toFixed(2)
-                    )}
-                  </div>
-                </div>
-              </div>
-              {/* 👇👇👇 [新增] 一键补录按钮 👇👇👇 */}
-              <button
-                onClick={() => {
-                  setShowDailyReportModal(false); // 关闭战报
-                  setTargetDate(reportDate); // 🟢 关键：锁定战报显示的日期
-                  setIsManualEntry(true); // 开启手动模式
-                  setShowAddModal(true); // 打开输入弹窗
-                }}
-                className="w-full py-3 mb-4 bg-white/5 border border-dashed border-slate-700 hover:bg-blue-600/10 hover:border-blue-500/50 hover:text-blue-400 text-slate-500 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
-              >
-                <Plus size={14} /> 补录 {reportDate} 的任务
-              </button>
-
-              <div className="space-y-3">
-                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">
-                  时间轴
-                </h4>
-                {reportData.tasks.length === 0 ? (
-                  <p className="text-slate-600 text-xs italic text-center py-4">
-                    当日无战斗记录
-                  </p>
-                ) : (
-                  reportData.tasks.map((task) => (
-                    <div key={task.id} className="flex gap-3 relative group">
-                      <div className="flex flex-col items-center">
-                        <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5"></div>
-                        <div className="w-px h-full bg-slate-800 my-1 group-last:hidden"></div>
-                      </div>
-                      <div className="pb-4">
-                        <div className="text-sm text-white font-medium">
-                          {task.title}
-                        </div>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">
-                            {task.project}
-                          </span>
-                          <span className="text-[10px] font-mono text-slate-500">
-                            {formatTime(task.duration)}
-                          </span>
-                          {task.actualRevenue > 0 && (
-                            <span className="text-[10px] font-mono text-emerald-500">
-                              +¥{Number(task.actualRevenue).toFixed(2)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Adjust Existing Task Modal */}
-        {showAdjustModal && (
-          <div
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in"
-            onClick={() => setShowAdjustModal(false)}
-          >
-            <div
-              className="bg-[#0f172a] border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-slide-up"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3 className="font-bold text-lg mb-6 flex items-center gap-2">
-                <History size={18} className="text-amber-500" /> 补录旧账 /
-                追加时间
-              </h3>
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] font-bold text-amber-500 uppercase mb-1 block">
-                      追加时长 (分钟)
-                    </label>
-                    <input
-                      type="number"
-                      value={adjustTaskData.addMinutes}
-                      onChange={(e) =>
-                        setAdjustTaskData({
-                          ...adjustTaskData,
-                          addMinutes: e.target.value,
-                        })
-                      }
-                      className="w-full bg-black/40 border border-amber-500/50 rounded-xl px-4 py-3 outline-none focus:border-amber-500 text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-emerald-500 uppercase mb-1 block">
-                      追加收益 (¥)
-                    </label>
-                    <input
-                      type="number"
-                      value={adjustTaskData.addRevenue}
-                      onChange={(e) =>
-                        setAdjustTaskData({
-                          ...adjustTaskData,
-                          addRevenue: e.target.value,
-                        })
-                      }
-                      className="w-full bg-black/40 border border-emerald-500/50 rounded-xl px-4 py-3 outline-none focus:border-emerald-500 text-white"
-                    />
-                  </div>
-                </div>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  适用于：忘记开计时器、线下工作补录、或项目奖金追加。
-                </p>
-                <div className="flex gap-3 mt-2">
-                  <button
-                    onClick={() =>
-                      handleTaskAction("adjust", adjustTaskData.id, {
-                        ...adjustTaskData,
-                        shouldStart: false,
-                      })
-                    }
-                    className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold transition-all"
-                  >
-                    仅补录
-                  </button>
-                  <button
-                    onClick={() =>
-                      handleTaskAction("adjust", adjustTaskData.id, {
-                        ...adjustTaskData,
-                        shouldStart: true,
-                      })
-                    }
-                    className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2"
-                  >
-                    <PlayCircle size={16} /> 补录并计时
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Stat Details Modal */}
-        {selectedStat && STAT_DETAILS[selectedStat] && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in"
-            onClick={() => setSelectedStat(null)}
-          >
-            <div
-              className="bg-[#0f172a] border border-slate-800 p-8 rounded-3xl max-w-sm w-full shadow-2xl animate-slide-up"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center gap-4 mb-6">
-                <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
-                  {STAT_DETAILS[selectedStat].icon}
-                </div>
+              {/* 3. 价值定义 (XP倍率 & 金额) */}
+              <div className="bg-slate-900/50 p-4 rounded-2xl border border-white/5 space-y-4">
+                {/* XP 成长类型 */}
                 <div>
-                  <h3 className="text-xl font-bold text-white">
-                    {STAT_DETAILS[selectedStat].title}
-                  </h3>
-                  <p className="text-slate-400 text-xs">
-                    {STAT_DETAILS[selectedStat].subtitle}
-                  </p>
+                  <label className="text-[10px] font-bold text-purple-400 uppercase mb-2 block flex items-center gap-1">
+                    <Zap size={10} /> 经验值倍率 (XP Growth)
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() =>
+                        setNewTask({ ...newTask, xpType: "growth" })
+                      }
+                      className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                        newTask.xpType === "growth"
+                          ? "bg-purple-600 text-white border-purple-400 shadow-lg shadow-purple-900/50"
+                          : "bg-slate-800 text-slate-400 border-transparent hover:bg-slate-700"
+                      }`}
+                    >
+                      🟣 进化 (200%)
+                    </button>
+                    <button
+                      onClick={() => setNewTask({ ...newTask, xpType: "work" })}
+                      className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                        !newTask.xpType || newTask.xpType === "work"
+                          ? "bg-blue-600 text-white border-blue-400 shadow-lg shadow-blue-900/50"
+                          : "bg-slate-800 text-slate-400 border-transparent hover:bg-slate-700"
+                      }`}
+                    >
+                      🔵 搬砖 (100%)
+                    </button>
+                    <button
+                      onClick={() =>
+                        setNewTask({ ...newTask, xpType: "maintenance" })
+                      }
+                      className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                        newTask.xpType === "maintenance"
+                          ? "bg-emerald-600 text-white border-emerald-400 shadow-lg shadow-emerald-900/50"
+                          : "bg-slate-800 text-slate-400 border-transparent hover:bg-slate-700"
+                      }`}
+                    >
+                      🟢 维持 (50%)
+                    </button>
+                  </div>
+                </div>
+
+                {/* 金额设定 */}
+                <div>
+                  <label className="text-[10px] font-bold text-emerald-400 uppercase mb-2 block flex items-center gap-1">
+                    <DollarSign size={10} />
+                    {newTask.mode === "bounty"
+                      ? "悬赏总金额 (Bounty)"
+                      : "预计时薪 (Hourly Rate)"}
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-mono">
+                      ¥
+                    </span>
+                    <input
+                      type="number"
+                      value={newTask.estValue}
+                      onChange={(e) =>
+                        setNewTask({ ...newTask, estValue: e.target.value })
+                      }
+                      className="w-full bg-black/40 border border-emerald-500/30 rounded-xl py-3 pl-8 pr-4 text-emerald-400 font-mono font-bold outline-none focus:border-emerald-500 placeholder:text-slate-700"
+                      placeholder="0"
+                    />
+                    {newTask.mode !== "bounty" && (
+                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 text-xs font-bold">
+                        / hour
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-              {selectedStat === "roi" && (
-                <div className="bg-black/40 p-4 rounded-xl border border-white/5 mb-6">
-                  <div className="flex justify-between items-center text-sm mb-2">
-                    <span className="text-emerald-400 font-bold">总营收</span>{" "}
-                    <span className="font-mono text-white">
-                      ¥{stats.totalRevenue.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="w-full h-px bg-slate-700 my-2 relative">
-                    <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#0f172a] px-2 text-xs text-slate-500">
-                      除以 (÷)
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm mt-2">
-                    <span className="text-blue-400 font-bold">总时长</span>{" "}
-                    <span className="font-mono text-white">
-                      {stats.totalDurationHrs.toFixed(1)} 小时
-                    </span>
-                  </div>
+
+              {/* 补录模式下的额外时间输入 */}
+              {isManualEntry && (
+                <div className="animate-fade-in">
+                  <label className="text-[10px] font-bold text-amber-500 uppercase mb-1 block">
+                    已耗时 (分钟)
+                  </label>
+                  <input
+                    type="number"
+                    value={newTask.manualDurationMinutes}
+                    onChange={(e) =>
+                      setNewTask({
+                        ...newTask,
+                        manualDurationMinutes: e.target.value,
+                      })
+                    }
+                    className="w-full bg-black/40 border border-amber-500/50 rounded-xl px-4 py-3 text-white outline-none focus:border-amber-500"
+                  />
                 </div>
               )}
-              <div className="space-y-5">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-xs font-bold text-blue-400 uppercase tracking-wider">
-                    <Calculator size={12} /> 计算公式
-                  </div>
-                  <p className="text-white font-mono text-sm bg-black/40 p-2 rounded-lg border border-white/5">
-                    {STAT_DETAILS[selectedStat].formula}
-                  </p>
+
+              {/* 底部按钮 */}
+              <div className="pt-2">
+                <button
+                  onClick={() => addTask(isManualEntry ? false : true)} // 补录直接归档，实时则开始计时
+                  className={`w-full py-4 rounded-xl font-bold text-white shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 ${
+                    newTask.mode === "bounty"
+                      ? "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500"
+                      : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500"
+                  }`}
+                >
+                  {isManualEntry ? (
+                    <>
+                      {" "}
+                      <CheckCircle2 size={18} /> 立即归档入库{" "}
+                    </>
+                  ) : newTask.mode === "bounty" ? (
+                    <>
+                      {" "}
+                      <Target size={18} /> 发布悬赏令{" "}
+                    </>
+                  ) : (
+                    <>
+                      {" "}
+                      <Play size={18} /> 启动计时器{" "}
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Daily Report Modal (New Feature) */}
+      {showDailyReportModal && reportData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-fade-in"
+          onClick={() => setShowDailyReportModal(false)}
+        >
+          <div
+            className="bg-[#0f172a] border border-slate-800 p-6 rounded-3xl max-w-sm w-full shadow-2xl animate-slide-up max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-lg">
+                  {reportDate.split("-")[2]}
                 </div>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
-                    <BrainCircuit size={12} /> 底层逻辑
-                  </div>
-                  <p className="text-slate-300 text-sm leading-relaxed">
-                    {STAT_DETAILS[selectedStat].logic}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                    <Lightbulb size={12} /> 强者建议
-                  </div>
-                  <p className="text-slate-300 text-sm leading-relaxed">
-                    {STAT_DETAILS[selectedStat].tips}
+                <div>
+                  <h3 className="font-bold text-white text-lg">单日战报</h3>
+                  <p className="text-slate-500 text-xs font-mono">
+                    {reportDate}
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => setSelectedStat(null)}
-                className="w-full mt-8 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-sm font-bold text-white transition-colors"
+                onClick={() => setShowDailyReportModal(false)}
+                className="p-2 bg-slate-800 rounded-full text-slate-400 hover:text-white"
               >
-                明白了
+                <X size={16} />
               </button>
             </div>
+
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl">
+                <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">
+                  当日投入
+                </div>
+                <div className="font-mono text-white text-lg font-bold">
+                  {(reportData.duration / 3600).toFixed(1)}h
+                </div>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl">
+                <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">
+                  当日产出
+                </div>
+                <div className="font-mono text-emerald-400 text-lg font-bold">
+                  ¥
+                  {reportData.tasks.reduce(
+                    (acc, t) => acc + (t.actualRevenue || 0),
+                    (0).toFixed(2)
+                  )}
+                </div>
+              </div>
+            </div>
+            {/* 👇👇👇 [新增] 一键补录按钮 👇👇👇 */}
+            <button
+              onClick={() => {
+                setShowDailyReportModal(false); // 关闭战报
+                setTargetDate(reportDate); // 🟢 关键：锁定战报显示的日期
+                setIsManualEntry(true); // 开启手动模式
+                setShowAddModal(true); // 打开输入弹窗
+              }}
+              className="w-full py-3 mb-4 bg-white/5 border border-dashed border-slate-700 hover:bg-blue-600/10 hover:border-blue-500/50 hover:text-blue-400 text-slate-500 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+            >
+              <Plus size={14} /> 补录 {reportDate} 的任务
+            </button>
+
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">
+                时间轴
+              </h4>
+              {reportData.tasks.length === 0 ? (
+                <p className="text-slate-600 text-xs italic text-center py-4">
+                  当日无战斗记录
+                </p>
+              ) : (
+                reportData.tasks.map((task) => (
+                  <div key={task.id} className="flex gap-3 relative group">
+                    <div className="flex flex-col items-center">
+                      <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5"></div>
+                      <div className="w-px h-full bg-slate-800 my-1 group-last:hidden"></div>
+                    </div>
+                    <div className="pb-4">
+                      <div className="text-sm text-white font-medium">
+                        {task.title}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">
+                          {task.project}
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-500">
+                          {formatTime(task.duration)}
+                        </span>
+                        {task.actualRevenue > 0 && (
+                          <span className="text-[10px] font-mono text-emerald-500">
+                            +¥{Number(task.actualRevenue).toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
-        )}
-        {/* === 底部导航栏 === */}
-        <div className="fixed bottom-0 left-0 w-full bg-[#020617]/90 backdrop-blur-xl border-t border-white/10 px-6 py-2 z-40 md:hidden pb-safe">
-          <div className="flex justify-around items-center">
+        </div>
+      )}
+
+      {/* Adjust Existing Task Modal */}
+      {showAdjustModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in"
+          onClick={() => setShowAdjustModal(false)}
+        >
+          <div
+            className="bg-[#0f172a] border border-slate-800 rounded-t-3xl sm:rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-bold text-lg mb-6 flex items-center gap-2">
+              <History size={18} className="text-amber-500" /> 补录旧账 /
+              追加时间
+            </h3>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-amber-500 uppercase mb-1 block">
+                    追加时长 (分钟)
+                  </label>
+                  <input
+                    type="number"
+                    value={adjustTaskData.addMinutes}
+                    onChange={(e) =>
+                      setAdjustTaskData({
+                        ...adjustTaskData,
+                        addMinutes: e.target.value,
+                      })
+                    }
+                    className="w-full bg-black/40 border border-amber-500/50 rounded-xl px-4 py-3 outline-none focus:border-amber-500 text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-emerald-500 uppercase mb-1 block">
+                    追加收益 (¥)
+                  </label>
+                  <input
+                    type="number"
+                    value={adjustTaskData.addRevenue}
+                    onChange={(e) =>
+                      setAdjustTaskData({
+                        ...adjustTaskData,
+                        addRevenue: e.target.value,
+                      })
+                    }
+                    className="w-full bg-black/40 border border-emerald-500/50 rounded-xl px-4 py-3 outline-none focus:border-emerald-500 text-white"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                适用于：忘记开计时器、线下工作补录、或项目奖金追加。
+              </p>
+              <div className="flex gap-3 mt-2">
+                <button
+                  onClick={() =>
+                    handleTaskAction("adjust", adjustTaskData.id, {
+                      ...adjustTaskData,
+                      shouldStart: false,
+                    })
+                  }
+                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold transition-all"
+                >
+                  仅补录
+                </button>
+                <button
+                  onClick={() =>
+                    handleTaskAction("adjust", adjustTaskData.id, {
+                      ...adjustTaskData,
+                      shouldStart: true,
+                    })
+                  }
+                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2"
+                >
+                  <PlayCircle size={16} /> 补录并计时
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stat Details Modal */}
+      {selectedStat && STAT_DETAILS[selectedStat] && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in"
+          onClick={() => setSelectedStat(null)}
+        >
+          <div
+            className="bg-[#0f172a] border border-slate-800 p-8 rounded-3xl max-w-sm w-full shadow-2xl animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-4 mb-6">
+              <div className="p-3 bg-white/5 rounded-2xl border border-white/10">
+                {STAT_DETAILS[selectedStat].icon}
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-white">
+                  {STAT_DETAILS[selectedStat].title}
+                </h3>
+                <p className="text-slate-400 text-xs">
+                  {STAT_DETAILS[selectedStat].subtitle}
+                </p>
+              </div>
+            </div>
+            {selectedStat === "roi" && (
+              <div className="bg-black/40 p-4 rounded-xl border border-white/5 mb-6">
+                <div className="flex justify-between items-center text-sm mb-2">
+                  <span className="text-emerald-400 font-bold">总营收</span>{" "}
+                  <span className="font-mono text-white">
+                    ¥{stats.totalRevenue.toLocaleString()}
+                  </span>
+                </div>
+                <div className="w-full h-px bg-slate-700 my-2 relative">
+                  <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#0f172a] px-2 text-xs text-slate-500">
+                    除以 (÷)
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-sm mt-2">
+                  <span className="text-blue-400 font-bold">总时长</span>{" "}
+                  <span className="font-mono text-white">
+                    {stats.totalDurationHrs.toFixed(1)} 小时
+                  </span>
+                </div>
+              </div>
+            )}
+            <div className="space-y-5">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs font-bold text-blue-400 uppercase tracking-wider">
+                  <Calculator size={12} /> 计算公式
+                </div>
+                <p className="text-white font-mono text-sm bg-black/40 p-2 rounded-lg border border-white/5">
+                  {STAT_DETAILS[selectedStat].formula}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
+                  <BrainCircuit size={12} /> 底层逻辑
+                </div>
+                <p className="text-slate-300 text-sm leading-relaxed">
+                  {STAT_DETAILS[selectedStat].logic}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                  <Lightbulb size={12} /> 强者建议
+                </div>
+                <p className="text-slate-300 text-sm leading-relaxed">
+                  {STAT_DETAILS[selectedStat].tips}
+                </p>
+              </div>
+            </div>
             <button
-              onClick={() => setActiveTab("execution")}
-              className={`flex flex-col items-center gap-1 p-2 transition-colors ${
-                activeTab === "execution" ? "text-blue-500" : "text-slate-500"
-              }`}
+              onClick={() => setSelectedStat(null)}
+              className="w-full mt-8 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-sm font-bold text-white transition-colors"
             >
-              <LayoutDashboard size={24} />
-              <span className="text-[10px] font-bold">作战</span>
-            </button>
-
-            <div className="w-px h-8 bg-white/10"></div>
-
-            <button
-              onClick={() => setActiveTab("audit")}
-              className={`flex flex-col items-center gap-1 p-2 transition-colors ${
-                activeTab === "audit" ? "text-rose-500" : "text-slate-500"
-              }`}
-            >
-              <Heart size={24} />
-              <span className="text-[10px] font-bold">审计</span>
-            </button>
-
-            <div className="w-px h-8 bg-white/10"></div>
-
-            <button
-              onClick={() => setActiveTab("assets")}
-              className={`flex flex-col items-center gap-1 p-2 transition-colors ${
-                activeTab === "assets" ? "text-slate-300" : "text-slate-500"
-              }`}
-            >
-              <ShieldCheck size={24} />
-              <span className="text-[10px] font-bold">资产</span>
+              明白了
             </button>
           </div>
         </div>
-      </div>
-    );
-  };
+      )}
+      {/* === 底部导航栏 === */}
+      <div className="fixed bottom-0 left-0 w-full bg-[#020617]/90 backdrop-blur-xl border-t border-white/10 px-6 py-2 z-40 md:hidden pb-safe">
+        <div className="flex justify-around items-center">
+          <button
+            onClick={() => setActiveTab("execution")}
+            className={`flex flex-col items-center gap-1 p-2 transition-colors ${
+              activeTab === "execution" ? "text-blue-500" : "text-slate-500"
+            }`}
+          >
+            <LayoutDashboard size={24} />
+            <span className="text-[10px] font-bold">作战</span>
+          </button>
 
-  // ==========================================
-  // 核心卡片组件：StatBox (苹果原生级排版升级)
-  // ==========================================
-  const StatBox = ({
-    label,
-    prefix,
-    value,
-    unit,
-    color,
-    icon,
-    onClick,
-    subNode,
-  }) => (
-    <div
-      onClick={onClick}
-      className="bg-[#0f172a]/40 border border-slate-800/60 hover:border-slate-700 p-4 rounded-3xl cursor-pointer group transition-all duration-300 active:scale-95 flex flex-col justify-between relative overflow-hidden shadow-lg shadow-black/20"
-    >
-      <div className="flex justify-between items-start mb-3 relative z-10">
-        <div className="text-[10px] text-slate-400 uppercase tracking-widest font-bold flex items-center gap-1.5 group-hover:text-blue-400 transition-colors">
-          {icon} {label}
+          <div className="w-px h-8 bg-white/10"></div>
+
+          <button
+            onClick={() => setActiveTab("audit")}
+            className={`flex flex-col items-center gap-1 p-2 transition-colors ${
+              activeTab === "audit" ? "text-rose-500" : "text-slate-500"
+            }`}
+          >
+            <Heart size={24} />
+            <span className="text-[10px] font-bold">审计</span>
+          </button>
+
+          <div className="w-px h-8 bg-white/10"></div>
+
+          <button
+            onClick={() => setActiveTab("assets")}
+            className={`flex flex-col items-center gap-1 p-2 transition-colors ${
+              activeTab === "assets" ? "text-slate-300" : "text-slate-500"
+            }`}
+          >
+            <ShieldCheck size={24} />
+            <span className="text-[10px] font-bold">资产</span>
+          </button>
         </div>
-        <HelpCircle
-          size={12}
-          className="text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity"
-        />
-      </div>
-
-      <div className="relative z-10">
-        {/* 🔴 核心修复：完美的基线对齐 (items-baseline) 与数字紧凑排版 (tabular-nums) */}
-        <div className={`flex items-baseline font-bold ${color}`}>
-          {/* 金钱符号变小，并降低一点透明度，不抢主体数字的戏 */}
-          {prefix && (
-            <span className="text-sm opacity-80 mr-0.5 font-sans font-medium">
-              {prefix}
-            </span>
-          )}
-
-          {/* 主体大数字：收紧字间距 */}
-          <span className="text-3xl tracking-tight tabular-nums">{value}</span>
-
-          {/* 单位标签：底边完美对齐，使用浅灰色 */}
-          {unit && (
-            <span className="text-xs text-slate-500 font-medium uppercase tracking-widest ml-1">
-              {unit}
-            </span>
-          )}
-        </div>
-
-        {/* 预测收益小标签 */}
-        {subNode && <div className="mt-2.5">{subNode}</div>}
       </div>
     </div>
   );
 };
+
+// ==========================================
+// 核心卡片组件：StatBox (苹果原生级排版升级)
+// ==========================================
+const StatBox = ({
+  label,
+  prefix,
+  value,
+  unit,
+  color,
+  icon,
+  onClick,
+  subNode,
+}) => (
+  <div
+    onClick={onClick}
+    className="bg-[#0f172a]/40 border border-slate-800/60 hover:border-slate-700 p-4 rounded-3xl cursor-pointer group transition-all duration-300 active:scale-95 flex flex-col justify-between relative overflow-hidden shadow-lg shadow-black/20"
+  >
+    <div className="flex justify-between items-start mb-3 relative z-10">
+      <div className="text-[10px] text-slate-400 uppercase tracking-widest font-bold flex items-center gap-1.5 group-hover:text-blue-400 transition-colors">
+        {icon} {label}
+      </div>
+      <HelpCircle
+        size={12}
+        className="text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity"
+      />
+    </div>
+
+    <div className="relative z-10">
+      {/* 🔴 核心修复：完美的基线对齐 (items-baseline) 与数字紧凑排版 (tabular-nums) */}
+      <div className={`flex items-baseline font-bold ${color}`}>
+        {/* 金钱符号变小，并降低一点透明度，不抢主体数字的戏 */}
+        {prefix && (
+          <span className="text-sm opacity-80 mr-0.5 font-sans font-medium">
+            {prefix}
+          </span>
+        )}
+
+        {/* 主体大数字：收紧字间距 */}
+        <span className="text-3xl tracking-tight tabular-nums">{value}</span>
+
+        {/* 单位标签：底边完美对齐，使用浅灰色 */}
+        {unit && (
+          <span className="text-xs text-slate-500 font-medium uppercase tracking-widest ml-1">
+            {unit}
+          </span>
+        )}
+      </div>
+
+      {/* 预测收益小标签 */}
+      {subNode && <div className="mt-2.5">{subNode}</div>}
+    </div>
+  </div>
+);
 export default App;
