@@ -2212,15 +2212,17 @@ const App = () => {
             </div>
             {/* ====== 顶部标题与操作栏 ====== */}
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 relative z-10 gap-4">
-              {/* 标题区域：极简徽章设计 */}
+              {/* 标题区域：极简徽章设计 (修复手机端换行挤压) */}
               <div>
-                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                  <LayoutDashboard className="text-blue-500" size={20} />
-                  <span className="tracking-tight">作战看板</span>
+                <div className="flex items-center">
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2 shrink-0">
+                    <LayoutDashboard className="text-blue-500" size={20} />
+                    <span className="tracking-tight">作战看板</span>
+                  </h2>
 
-                  {/* 🔴 极简日期游标徽章：只显示日期，点日历切换 */}
+                  {/* 🔴 优化后的极简日期游标：不换行、更圆润、防挤压 */}
                   <div
-                    className={`ml-2 px-2 py-0.5 rounded-md border flex items-center gap-1.5 transition-all ${
+                    className={`ml-3 px-3 py-1 rounded-full border flex items-center gap-1.5 transition-all whitespace-nowrap shrink-0 ${
                       globalDate === new Date().toISOString().split("T")[0]
                         ? "bg-blue-500/20 border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.2)]"
                         : "bg-slate-800/80 border-slate-700"
@@ -2235,7 +2237,7 @@ const App = () => {
                       }
                     />
                     <span
-                      className={`text-[11px] font-mono font-bold tracking-wider ${
+                      className={`text-xs font-mono font-bold tracking-wide ${
                         globalDate === new Date().toISOString().split("T")[0]
                           ? "text-blue-300"
                           : "text-slate-300"
@@ -2246,7 +2248,7 @@ const App = () => {
                         : globalDate}
                     </span>
                   </div>
-                </h2>
+                </div>
                 <p className="text-slate-400 text-sm mt-1">
                   "像经营公司一样经营你的人生。"
                 </p>
@@ -2476,7 +2478,7 @@ const App = () => {
                 <BarChart2 className="text-purple-500" size={24} /> 数据大盘
               </h2>
 
-              {/* 🔴 苹果原生感的时间区间选择器 */}
+              {/* 时间区间选择器 */}
               <div className="flex bg-black/40 p-1 rounded-xl border border-white/10 w-fit shadow-inner">
                 {[
                   { id: "7d", label: "近 7 天" },
@@ -2499,25 +2501,25 @@ const App = () => {
               </div>
             </div>
 
-            {/* 🔴 大盘四大核心看板 */}
+            {/* 大盘四大核心看板 (增加 Number 防弹保护) */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-10">
               <StatBox
                 label="区间总营收 (落袋)"
                 prefix="¥"
-                value={overviewStats.actualRev.toLocaleString("en-US", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+                value={Number(overviewStats.actualRev || 0).toLocaleString(
+                  "en-US",
+                  { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                )}
                 unit=""
                 color="text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)]"
                 icon={<DollarSign size={14} />}
                 subNode={
                   <div className="text-[10px] text-emerald-400 font-mono font-bold flex items-center gap-1 bg-emerald-500/10 w-fit px-1.5 py-0.5 rounded border border-emerald-500/20">
                     +¥
-                    {overviewStats.predictedRev.toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}{" "}
+                    {Number(overviewStats.predictedRev || 0).toLocaleString(
+                      "en-US",
+                      { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                    )}{" "}
                     预测
                   </div>
                 }
@@ -2526,7 +2528,7 @@ const App = () => {
               <StatBox
                 label="区间总时长"
                 prefix=""
-                value={overviewStats.durationHrs.toFixed(1)}
+                value={Number(overviewStats.durationHrs || 0).toFixed(1)}
                 unit="h"
                 color="text-blue-400 drop-shadow-[0_0_10px_rgba(59,130,246,0.3)]"
                 icon={<Clock size={14} />}
@@ -2535,7 +2537,7 @@ const App = () => {
               <StatBox
                 label="区间平均时薪"
                 prefix="¥"
-                value={overviewStats.avgROI.toFixed(0)}
+                value={Number(overviewStats.avgROI || 0).toFixed(0)}
                 unit="/h"
                 color={
                   overviewStats.avgROI < HOURLY_THRESHOLD &&
@@ -2549,18 +2551,18 @@ const App = () => {
               <StatBox
                 label="完成任务数"
                 prefix=""
-                value={overviewStats.completedCount}
+                value={overviewStats.completedCount || 0}
                 unit="个"
                 color="text-purple-400 drop-shadow-[0_0_10px_rgba(168,85,247,0.3)]"
                 icon={<CheckCircle2 size={14} />}
               />
             </div>
 
-            {/* 👇 新增：大盘项目明细列表 👇 */}
-            {overviewStats.projects.length > 0 && (
+            {/* 👇 大盘项目明细列表 (修复了图标导致的白屏) 👇 */}
+            {overviewStats?.projects?.length > 0 && (
               <div className="mb-10 bg-black/20 border border-white/5 rounded-2xl p-4">
                 <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                  <Briefcase size={14} /> 区间项目投入排行
+                  <FolderOpen size={14} /> 区间项目投入排行
                 </h3>
                 <div className="space-y-3">
                   {overviewStats.projects.map((proj, idx) => (
@@ -2581,7 +2583,7 @@ const App = () => {
                           {formatTime(proj.totalTime)}
                         </span>
                         <span className="text-emerald-500 w-16 text-right">
-                          ¥{proj.totalRev.toFixed(0)}
+                          ¥{Number(proj.totalRev || 0).toFixed(0)}
                         </span>
                       </div>
                     </div>
@@ -2620,7 +2622,7 @@ const App = () => {
                     <div className="text-[10px] text-slate-500 mt-1">
                       {isLocalMode
                         ? "离线模式 (数据存储在浏览器)"
-                        : `已同步云端 (${user.email || "Google User"})`}
+                        : `已同步云端 (${user?.email || "Google User"})`}
                     </div>
                   </div>
                   {isLocalMode && (
