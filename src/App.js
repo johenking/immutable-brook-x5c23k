@@ -3204,9 +3204,10 @@ const App = () => {
             {selectedStat === "roi" && (
               <div className="bg-black/40 p-4 rounded-xl border border-white/5 mb-6">
                 <div className="flex justify-between items-center text-sm mb-2">
-                  <span className="text-emerald-400 font-bold">总营收</span>{" "}
+                  <span className="text-emerald-400 font-bold">当日总营收</span>{" "}
                   <span className="font-mono text-white">
-                    ¥{stats.totalRevenue.toLocaleString()}
+                    {/* 🔴 核心修复：改为读取 stats.daily.totalRev 并增加防弹衣 */}
+                    ¥{Number(stats.daily.totalRev || 0).toLocaleString()}
                   </span>
                 </div>
                 <div className="w-full h-px bg-slate-700 my-2 relative">
@@ -3215,9 +3216,10 @@ const App = () => {
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-sm mt-2">
-                  <span className="text-blue-400 font-bold">总时长</span>{" "}
+                  <span className="text-blue-400 font-bold">当日总时长</span>{" "}
                   <span className="font-mono text-white">
-                    {stats.totalDurationHrs.toFixed(1)} 小时
+                    {/* 🔴 核心修复：改为读取 stats.daily.durationHrs 并增加防弹衣 */}
+                    {Number(stats.daily.durationHrs || 0).toFixed(1)} 小时
                   </span>
                 </div>
               </div>
